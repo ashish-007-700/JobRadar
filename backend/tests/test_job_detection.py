@@ -140,3 +140,26 @@ Apply now: https://example.com/apply/software-engineer
     assert job is not None
     assert job["title"]
     assert job["original_apply_url"] == "https://example.com/apply/software-engineer"
+
+
+# Telegram edge cases: media-only / empty / whitespace-only messages must not crash --------
+
+
+def test_media_only_message_with_no_text_is_not_a_job():
+    message = make_message(None)
+    assert process_message(message) is None
+
+
+def test_empty_string_message_is_not_a_job():
+    assert process_message(make_message("")) is None
+
+
+def test_whitespace_only_message_is_not_a_job():
+    assert process_message(make_message("   \n\t  ")) is None
+
+
+def test_very_long_message_does_not_crash_detection():
+    text = "Hiring Software Engineer. " * 500 + "Apply now: https://example.com/apply"
+    job = process_message(make_message(text))
+    assert job is not None
+    assert job["original_apply_url"] == "https://example.com/apply"

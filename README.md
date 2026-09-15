@@ -1,64 +1,194 @@
 # JobRadar
 
-JobRadar is a personal job-post aggregation application. It will read job postings from
-configured Telegram channels, resolve each posting's final application URL, and display the
-results in a React dashboard.
+## 1. Project purpose
 
-See [`docs/spec.md`](docs/spec.md) for the full project specification.
+JobRadar is a **personal** job-post aggregation tool. It reads job postings from Telegram
+channels you configure, follows each posting's "Apply Now" link through any intermediate
+pages to find the real application URL, and shows the results in a small React dashboard so
+you can review and apply without opening Telegram at all.
 
-## Progress
+It is not a SaaS product: there's no multi-user support, no public sign-up, and no
+authentication layer — it's meant to run on your own machine for your own job search.
 
-- **Section 1 — Project setup:** React + Vite + Tailwind frontend shell, FastAPI backend with
-  a health-check endpoint, CORS restricted to the Vite dev origin, environment variable
-  structure for both apps.
-- **Section 2 — Supabase setup:** Postgres schema for `channels`, `jobs`, and `fetch_runs`
-  (see `supabase/schema.sql`), and a backend Supabase client service with a DB connectivity
-  check at `/api/health/db`.
-- **Section 3 — Telegram authentication:** A Telethon-backed service that connects to a
-  Telegram user account, persists the session, and reports status at `/api/health/telegram`.
-- **Section 4 — Channel management:** Full channel CRUD (`/api/channels`) backed by
-  Supabase, with each channel validated/resolved against Telegram (via Telethon) before it's
-  stored, plus a revalidation endpoint and a Channels tab in the dashboard.
-- **Section 5 — Message fetching:** `POST /api/telegram/fetch` retrieves raw Telegram
-  messages for a requested date from enabled channels only, records the run in
-  `fetch_runs`, and a Fetch Test tab lets you try it from the UI.
-- **Section 6 — Job detection & extraction:** Deterministic, rule-based detection of which
-  fetched messages are genuine job posts, plus extraction of structured fields (company,
-  title, location, experience, qualification, batch, salary, skills, employment type,
-  original apply URL). Detected jobs are returned by the fetch endpoint but **not** saved to
-  Supabase yet.
-- **Section 7 — Application URL resolver:** Follows a job's `original_apply_url` through
-  intermediate pages (HTTP redirects, HTML apply-link following, a Playwright fallback for
-  JS-heavy pages) to a likely `final_apply_url`, with depth/loop limits and basic SSRF
-  protection. Exposed standalone at `POST /api/resolve-url`, and optionally wired into
-  `POST /api/telegram/fetch` via `resolve_urls: true`.
-- **Section 8 — Job storage:** Detected jobs can be persisted to the existing Supabase `jobs`
-  table (opt-in via `save_jobs: true` on the fetch endpoint), with `GET /api/jobs`
-  (filterable by date/company/location) and `GET /api/jobs/{id}` to read them back.
-- **Section 9 — React dashboard:** The Dashboard tab is now the real day-to-day tool: a date
-  picker + "Fetch Messages" (runs fetch → detect → resolve → save in one call and refreshes
-  the list), a live Telegram status indicator, real summary counts, company/location
-  (server-side) and experience/employment-type (client-side) filters, and job cards with an
-  Apply button (`final_apply_url`, falling back to `original_apply_url`) plus an expandable
-  details view. The old standalone "Jobs" tab was folded into the Dashboard; a "Debug: Fetch
-  Test" tab remains for inspecting raw messages/per-channel results while tuning detection.
-- **Section 10 — Fetch controls & status:** A process-local guard rejects a second fetch
-  while one is running (`409`), `GET /api/telegram/fetch/status` reports
-  idle/running/completed/partial/failed (backed by the latest `fetch_runs` row),
-  `GET /api/fetch-runs` lists recent runs, per-channel stats now include jobs
-  detected/saved, and error messages are friendlier (e.g. "Unable to access channel
-  @example." instead of a raw exception). The dashboard shows live fetch state with a Retry
-  action, and a new Fetch History tab lists recent runs with per-run error detail. Fixed a
-  real UTC/local-date bug in the frontend's default date picker along the way.
+Full pipeline:
 
-Deduplication and scheduling are **not** implemented yet.
+```text
+Telegram channels
+      ↓
+Telethon fetches messages for a date
+      ↓
+Deterministic rule-based job detection
+      ↓
+Field extraction (title, company, location, salary, ...)
+      ↓
+Application URL resolution (redirects, HTML links, JS fallback)
+      ↓
+Supabase storage
+      ↓
+React dashboard — review and Apply
+```
 
-## Required software
+See [`docs/spec.md`](docs/spec.md) for the original, detailed project specification this was
+built against.
+
+## 2. Technology stack
+
+| Layer | Tech |
+|---|---|
+| Frontend | React, Vite, Tailwind CSS |
+| Backend | Python, FastAPI |
+| Telegram | Telethon (user-account API, not a bot) |
+| Web retrieval | httpx, BeautifulSoup |
+| Browser automation | Playwright (fallback only, for JS-heavy pages) |
+| Database | Supabase (PostgreSQL) |
+| Testing | pytest, pytest-asyncio |
+
+## 3. Project structure
+
+```text
+jobradar/
+├── backend/
+│   ├── app/
+│   │   ├── main.py                 FastAPI app, CORS, lifespan, routers
+│   │   ├── config.py                Env var loading
+│   │   ├── telegram_login.py        One-time interactive Telegram login (CLI)
+│   │   ├── api/routes/              health, channels, telegram, resolver, jobs, fetch_runs
+│   │   └── services/                One module per concern:
+│   │       ├── supabase_client.py     Lazy Supabase client
+│   │       ├── telegram_client.py     Lazy Telethon client + connection lifecycle
+│   │       ├── channel_service.py     Channel CRUD + Telegram validation
+│   │       ├── message_service.py     Fetch orchestration, fetch_runs, concurrency guard
+│   │       ├── job_detection.py       Rule-based job detection + field extraction
+│   │       ├── url_resolver.py        Application URL resolution (httpx/BS4/Playwright)
+│   │       ├── job_service.py         Job persistence + retrieval
+│   │       └── fetch_run_service.py   Fetch history retrieval
+│   ├── tests/                       pytest suite (mocked Supabase/Telegram/HTTP — no
+│   │                                 real credentials required)
+│   ├── requirements.txt             Runtime dependencies
+│   └── requirements-dev.txt         + pytest/pytest-asyncio
+├── frontend/
+│   └── src/
+│       ├── pages/                   Dashboard, Channels, FetchHistory, FetchTest (debug)
+│       ├── components/              Header, JobCard, JobFilters, SummaryStats,
+│       │                            FetchStatusPanel, TelegramStatus
+│       ├── services/api.js          The only place that calls the backend
+│       └── utils/date.js            Local-timezone date helper
+├── supabase/
+│   ├── schema.sql                   Full current schema (fresh projects run this)
+│   └── migrations/                  Incremental changes for already-created projects
+└── docs/spec.md                     Original project specification
+```
+
+## 4. Prerequisites
 
 - Python 3.11+
 - Node.js 18+ and npm
+- A Telegram account (JobRadar logs in as *you*, not as a bot)
+- A free [Supabase](https://supabase.com) project
 
-## Backend setup
+## 5. Environment variables
+
+`backend/.env.example` (copy to `backend/.env` and fill in):
+
+```text
+BACKEND_HOST=127.0.0.1
+BACKEND_PORT=8000
+FRONTEND_URL=http://localhost:5173
+
+SUPABASE_URL=
+SUPABASE_KEY=
+
+TELEGRAM_API_ID=
+TELEGRAM_API_HASH=
+TELEGRAM_PHONE=
+TELEGRAM_SESSION_NAME=jobradar
+
+APP_TIMEZONE=UTC
+MAX_RESOLUTION_DEPTH=5
+```
+
+| Variable | Purpose |
+|---|---|
+| `BACKEND_HOST` / `BACKEND_PORT` | Where uvicorn listens |
+| `FRONTEND_URL` | The **only** origin allowed by CORS — must match where the frontend runs |
+| `SUPABASE_URL` / `SUPABASE_KEY` | Your Supabase project — see §6 |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` / `TELEGRAM_PHONE` | Your Telegram API credentials — see §7 |
+| `TELEGRAM_SESSION_NAME` | Base filename for the saved Telethon session |
+| `APP_TIMEZONE` | IANA timezone (e.g. `Asia/Kolkata`) used to interpret "today"/a requested date — see §12 |
+| `MAX_RESOLUTION_DEPTH` | Max hops the URL resolver will follow (see §13) |
+
+`frontend/.env.example` (copy to `frontend/.env`):
+
+```text
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Never commit real `.env` files — only the `.env.example` templates are tracked (`.gitignore`
+enforces this; see §16).
+
+## 6. Supabase setup
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. In the Supabase dashboard's **SQL Editor**, run `supabase/schema.sql` from this repo. It
+   creates the `channels`, `jobs`, and `fetch_runs` tables everything else depends on.
+   - If you created your project before this README's current state and already ran an older
+     copy of `schema.sql`, also run `supabase/migrations/0002_add_telegram_channel_id.sql`.
+     A brand-new project only needs the current `schema.sql`.
+3. In **Project Settings → API**, copy the Project URL and an API key.
+4. Put them in `backend/.env` as `SUPABASE_URL` / `SUPABASE_KEY`.
+5. After starting the backend (§9), check `GET http://localhost:8000/api/health/db` →
+   `{"status": "ok"}`. An `{"status": "error", "detail": "..."}` response explains what's
+   still missing.
+
+## 7. Telegram API setup
+
+JobRadar connects to Telegram as your own user account (via [Telethon](https://docs.telethon.dev)),
+not as a bot — this is what lets it read channels you're a member of.
+
+1. Go to [my.telegram.org](https://my.telegram.org) → **API development tools** and create an
+   app. This gives you an `api_id` and `api_hash`.
+2. Put them in `backend/.env` along with your phone number (international format):
+
+   ```text
+   TELEGRAM_API_ID=123456
+   TELEGRAM_API_HASH=your-api-hash
+   TELEGRAM_PHONE=+1234567890
+   ```
+
+**Security precautions:** treat `api_hash` like a password — never paste it into a chat,
+issue, or commit. It's excluded from `.env` (never committed) and never logged or returned by
+any API response.
+
+## 8. Telegram authentication
+
+The API credentials alone don't log you in — you do that once, interactively:
+
+1. From the `backend/` directory, with the virtualenv active:
+
+   ```bash
+   python -m app.telegram_login
+   ```
+
+2. It prompts on the **console** (not through the API or frontend) for the login code
+   Telegram sends you, and for your 2FA password if you have one enabled.
+3. On success, it saves a session file at `backend/<TELEGRAM_SESSION_NAME>.session` (e.g.
+   `backend/jobradar.session`). This file is git-ignored and **must never be committed or
+   shared** — anyone holding it can act as your Telegram account without needing the login
+   code again. Treat it like a password: if you suspect it leaked, delete it and re-run the
+   login.
+4. Every subsequent backend start reuses this session automatically — you won't be asked to
+   log in again unless the file is deleted or Telegram invalidates it.
+5. Verify with `GET http://localhost:8000/api/health/telegram`:
+
+   ```json
+   { "connected": true, "authenticated": true, "user": "your_username" }
+   ```
+
+   If credentials are missing, unauthenticated, or Telegram is unreachable, this returns
+   `{"connected": false, "authenticated": false, "detail": "..."}` — the backend keeps running
+   either way, it just can't fetch until this is fixed.
+
+## 9. Running the backend
 
 ```bash
 cd backend
@@ -66,117 +196,78 @@ python -m venv venv
 venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS/Linux
 pip install -r requirements.txt
-copy .env.example .env       # Windows; use `cp` on macOS/Linux
-```
-
-Run it:
-
-```bash
+copy .env.example .env       # Windows; use `cp` on macOS/Linux — then fill it in (§5-8)
 uvicorn app.main:app --reload
 ```
 
-Health check: `GET http://localhost:8000/api/health` → `{"status": "ok"}`
+Health check: `GET http://localhost:8000/api/health` → `{"status": "ok"}`. The backend starts
+successfully even before Supabase/Telegram are configured — those features just report a
+clear error (503) until you finish setup.
 
-## Supabase setup
+Optional, only needed for the URL resolver's JS-page fallback (§13):
 
-1. Create a project at [supabase.com](https://supabase.com).
-2. In the Supabase dashboard's SQL Editor, run `supabase/schema.sql` from this repo. It
-   creates the `channels`, `jobs`, and `fetch_runs` tables used by the rest of the app.
-3. In **Project Settings → API**, copy the Project URL and an API key.
-4. Add them to `backend/.env`:
+```bash
+playwright install chromium
+```
 
-   ```text
-   SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_KEY=your-api-key
-   ```
-5. Restart the backend and check `GET http://localhost:8000/api/health/db` →
-   `{"status": "ok"}`. If it returns `{"status": "error", "detail": "..."}`, the message
-   explains what's missing (env vars not set, schema not applied, etc.).
+## 10. Running the frontend
 
-If you already ran `supabase/schema.sql` before Section 4 was added, also run
-`supabase/migrations/0002_add_telegram_channel_id.sql` — it adds the `telegram_channel_id`
-column the channels API now relies on. A brand-new project only needs the current
-`supabase/schema.sql`.
+```bash
+cd frontend
+npm install
+copy .env.example .env       # Windows; use `cp` on macOS/Linux
+npm run dev
+```
 
-## Telegram authentication setup
+Opens on `http://localhost:5173`. All backend calls go through `frontend/src/services/api.js`
+— there are no raw `fetch()` calls in components.
 
-JobRadar connects to Telegram as your own user account (not a bot), using
-[Telethon](https://docs.telethon.dev).
+Four tabs:
 
-1. Get API credentials from [my.telegram.org](https://my.telegram.org) → **API development
-   tools**. This gives you an `api_id` and `api_hash`.
-2. Add them to `backend/.env`:
+- **Dashboard** — the daily-use screen: pick a date, click **Fetch Messages**, browse job
+  cards, click **Apply Now**. See §12.
+- **Channels** — add/enable/disable/revalidate/delete the Telegram channels JobRadar reads
+  from. See §11.
+- **Fetch History** — a table of recent fetch runs with per-run error detail.
+- **Debug: Fetch Test** — inspects raw fetched messages and per-channel results independent
+  of saving; useful while tuning detection/resolution against your actual channels.
 
-   ```text
-   TELEGRAM_API_ID=123456
-   TELEGRAM_API_HASH=your-api-hash
-   TELEGRAM_PHONE=+1234567890
-   TELEGRAM_SESSION_NAME=jobradar
-   ```
-3. Run the one-time interactive login from the `backend/` directory (venv active):
+## 11. Adding Telegram channels
 
-   ```bash
-   python -m app.telegram_login
-   ```
-
-   It prompts on the console for the login code Telegram sends you, and for your 2FA
-   password if you have one enabled. Nothing is sent to or exposed through the API/frontend.
-4. This creates a session file at `backend/<TELEGRAM_SESSION_NAME>.session` (e.g.
-   `backend/jobradar.session`). It is git-ignored and must never be committed — anyone with
-   this file can act as your Telegram account without needing the login code again.
-5. On every subsequent backend start, the existing session is reused automatically — you
-   won't be asked to log in again unless the session file is deleted or Telegram invalidates
-   it.
-6. Check `GET http://localhost:8000/api/health/telegram` to confirm:
-
-   ```json
-   { "connected": true, "authenticated": true, "user": "your_username" }
-   ```
-
-   If credentials are missing or Telegram is unreachable, this returns
-   `{"connected": false, "authenticated": false, "detail": "..."}` instead of crashing the
-   backend.
-
-**Security precautions:** never commit `.env` or `*.session` files, never paste your API
-hash, login code, or 2FA password into a chat or issue, and treat the `.session` file like a
-password — delete and re-authenticate if you suspect it leaked.
-
-## Channel management
-
-Once Supabase and Telegram authentication are both set up, use the **Channels** tab in the
-dashboard (or the API directly) to configure which channels JobRadar reads from:
+Once Supabase and Telegram auth are both set up, use the **Channels** tab (or the API
+directly):
 
 - `GET /api/channels` — list configured channels.
-- `POST /api/channels` `{"channel": "@fresheroffcampus"}` — normalizes the input (accepts
-  `@username`, `username`, `https://t.me/username`, or `https://t.me/s/username`), resolves it
-  through Telethon, and only stores it in Supabase if the channel exists and is accessible to
-  your authenticated Telegram account.
-- `PUT /api/channels/{id}` `{"enabled": false}` — enable/disable a channel without deleting it.
+- `POST /api/channels` `{"channel": "@fresheroffcampus"}` — accepts `@username`, `username`,
+  `https://t.me/username`, or `https://t.me/s/username`. The backend resolves it through
+  Telethon and only stores it if the channel exists and your account can access it — nothing
+  is saved on failure.
+- `PUT /api/channels/{id}` `{"enabled": false}` — enable/disable without deleting.
 - `DELETE /api/channels/{id}` — remove a channel.
 - `POST /api/channels/{id}/validate` — re-checks a stored channel against Telegram and
-  refreshes its name/ID in Supabase if they changed.
+  refreshes its name/ID if they changed.
 
-Only `enabled` channels will be used by the future message-fetching pipeline. All Telegram
-interaction happens in the backend — the frontend never sees API credentials or session data.
+Only `enabled` channels are read during a fetch. All Telegram interaction stays in the
+backend — the frontend never sees API credentials or session data.
 
-## Message fetching & job detection (testing only)
+## 12. Fetching jobs
 
-`POST /api/telegram/fetch` retrieves messages for a given date from all **enabled** channels,
-then runs each message through deterministic, rule-based job detection (see
-`backend/app/services/job_detection.py`). Nothing is saved to Supabase yet — this endpoint is
-for verifying the pipeline.
+Click **Fetch Messages** on the Dashboard for the selected date, or call the API directly:
 
 ```bash
 curl -X POST http://localhost:8000/api/telegram/fetch \
   -H "Content-Type: application/json" \
-  -d '{"date": "2026-09-15"}'
+  -d '{"date": "2026-09-15", "resolve_urls": true, "save_jobs": true}'
 ```
 
-Omit `date` (or send `{}`/no body) to use today's date, interpreted in the `APP_TIMEZONE`
-configured in `backend/.env` (default `UTC`) — set it to your own IANA timezone (e.g.
-`Asia/Kolkata`) so "today" matches your local day, not UTC's.
+Omit `date` (or send `{}`) to use today, interpreted in `APP_TIMEZONE` — set this to your own
+IANA timezone (e.g. `Asia/Kolkata`) so "today" and message-to-day assignment match your local
+calendar day rather than UTC's; a message posted just after local midnight would otherwise be
+assigned to the wrong day. `resolve_urls`/`save_jobs` default to `false` so the **Debug: Fetch
+Test** tab can dry-run the pipeline without writing to Supabase or making slow outbound
+requests; the Dashboard always passes both as `true`.
 
-Response shape:
+Response:
 
 ```json
 {
@@ -185,82 +276,83 @@ Response shape:
   "channels_processed": 3,
   "messages_found": 47,
   "jobs_detected": 12,
-  "jobs_saved": 0,
+  "jobs_saved": 12,
   "errors": [],
   "channel_results": [
-    {
-      "channel_username": "fresheroffcampus",
-      "messages_processed": 21,
-      "status": "ok",
-      "jobs_detected": 5,
-      "jobs_saved": 0
-    },
-    {
-      "channel_username": "offcampus_jobs",
-      "messages_processed": 0,
-      "status": "error",
-      "error": "Unable to access channel @offcampus_jobs.",
-      "jobs_detected": 0,
-      "jobs_saved": 0
-    }
+    { "channel_username": "fresheroffcampus", "messages_processed": 21, "status": "ok", "jobs_detected": 5, "jobs_saved": 5 },
+    { "channel_username": "offcampus_jobs", "messages_processed": 0, "status": "error", "error": "Unable to access channel @offcampus_jobs.", "jobs_detected": 0, "jobs_saved": 0 }
   ],
-  "messages": [
-    {
-      "message_id": 123,
-      "channel_id": -1001234567890,
-      "channel_username": "fresheroffcampus",
-      "message_text": "...",
-      "message_date": "2026-09-15T09:00:00+00:00",
-      "message_url": "https://t.me/fresheroffcampus/123"
-    }
-  ],
-  "jobs": [
-    {
-      "company": "Clarivate",
-      "title": "Associate STEM Content Analyst (Engineering)",
-      "location": "Chennai (Hybrid)",
-      "experience": "Freshers / 0-1 Year",
-      "qualification": "B.Sc/M.Sc - Mathematics, Physics, Computer Science, BCA/MCA",
-      "batch": "2025 / 2026",
-      "salary": "Up to ₹6 LPA",
-      "skills": null,
-      "employment_type": null,
-      "original_apply_url": "https://www.fresheroffcampus.com/clarivate-off-campus/",
-      "final_apply_url": null,
-      "telegram_message_id": 123,
-      "telegram_channel": "fresheroffcampus",
-      "telegram_message_url": "https://t.me/fresheroffcampus/123",
-      "posted_at": "2026-09-15T09:00:00+00:00"
-    }
-  ]
+  "messages": [ { "message_id": 123, "channel_id": -1001234567890, "channel_username": "fresheroffcampus", "message_text": "...", "message_date": "2026-09-15T09:00:00+00:00", "message_url": "https://t.me/fresheroffcampus/123" } ],
+  "jobs": [ { "company": "Clarivate", "title": "Associate STEM Content Analyst (Engineering)", "location": "Chennai (Hybrid)", "experience": "Freshers / 0-1 Year", "qualification": "B.Sc/M.Sc - Mathematics, Physics, Computer Science, BCA/MCA", "batch": "2025 / 2026", "salary": "Up to ₹6 LPA", "skills": null, "employment_type": null, "original_apply_url": "https://www.fresheroffcampus.com/clarivate-off-campus/", "final_apply_url": "https://careers.clarivate.com/job/12345", "telegram_message_id": 123, "telegram_channel": "fresheroffcampus", "telegram_message_url": "https://t.me/fresheroffcampus/123", "posted_at": "2026-09-15T09:00:00+00:00", "saved": true, "id": "..." } ]
 }
 ```
 
-A failing channel is reported in `channel_results` with `status: "error"` and does not stop
-the rest of the fetch. Every call is also logged as a row in `fetch_runs` (status
-`completed`, `completed_with_errors`, or `failed`).
+A failing channel is reported in `channel_results` and does not stop the rest of the fetch; a
+job that fails to save is reported the same way (`"saved": false`) without discarding the
+others. `status` is `completed`, `completed_with_errors`, or `failed`; every call is also
+logged as a row in `fetch_runs`.
 
-Job detection is deterministic/rule-based (keyword + structured-field scoring), not an LLM —
-see `backend/app/services/job_detection.py` if you want to tune the keyword lists or
-threshold. Run its test suite from `backend/` (venv active, `pip install -r
-requirements-dev.txt` once):
+**Only one fetch runs at a time** (a process-local guard — this is a single-instance personal
+app, not a distributed system). A second request while one is running gets:
+
+```json
+{"detail": "A fetch is already running. Please wait for it to finish."}
+```
+with `409 Conflict`. Check the current/last state at any time — useful after a page reload,
+since the frontend can't otherwise tell if a fetch it started is still running:
 
 ```bash
-pytest tests/test_job_detection.py -v
+curl http://localhost:8000/api/telegram/fetch/status
 ```
 
-Use the **Fetch Test** tab in the frontend to pick a date, run a fetch, see per-channel
-counts, browse detected jobs as cards, and expand each job's (or any raw message's) full JSON
-for debugging. Check "Resolve apply URLs" there to also run each detected job's
-`original_apply_url` through the resolver below (slower, since it makes real HTTP requests).
+`state` is `idle` (nothing has run yet), `running`, `completed`, `partial`
+(`completed_with_errors`), or `failed`. List recent runs (also shown in the **Fetch History**
+tab):
 
-## Application URL resolver
+```bash
+curl "http://localhost:8000/api/fetch-runs?limit=10"
+```
 
-Given a job's initial "Apply Now" link, `backend/app/services/url_resolver.py` follows HTTP
-redirects and HTML "Apply"-style links (via httpx + BeautifulSoup) — falling back to
-Playwright only when a page looks JS-rendered (little visible text, several `<script>` tags
-and no plain links) — until it reaches a page with no further application link, or a
-configurable hop limit (`MAX_RESOLUTION_DEPTH`, default 5) is hit.
+Job detection (`backend/app/services/job_detection.py`) is deterministic and rule-based — a
+keyword + structured-field scoring function, not an LLM. Errors surfaced anywhere in this
+pipeline are converted to plain language before reaching the API (e.g. `"Unable to access
+channel @example."`, `"Telegram authentication is unavailable. Run the login script
+first."`, `"Timed out while resolving an application URL."`) — raw exceptions stay in the
+backend logs only.
+
+Read saved jobs back, with filtering:
+
+```bash
+curl "http://localhost:8000/api/jobs?date=2026-09-15&company=Clarivate&location=Chennai"
+curl http://localhost:8000/api/jobs/<job-id>
+```
+
+`date` matches a job's `posted_at` day; `company`/`location` are case-insensitive partial
+matches; `limit`/`offset` paginate. `GET /api/jobs/{id}` returns 404 for a missing job, 400
+for a malformed id. `original_apply_url` and `final_apply_url` are always stored as separate
+columns — saving never overwrites one with the other, and missing fields are stored as `null`
+rather than guessed. **No deduplication is performed anywhere in the pipeline** — fetching and
+saving the same message twice inserts two rows (the schema's `content_hash` column exists but
+is intentionally unused for now).
+
+## 13. Understanding the application URL resolver
+
+Given a job's initial "Apply Now" link, `backend/app/services/url_resolver.py` follows the
+chain to what's likely the real employer application page:
+
+1. Fetches the URL over HTTP, following redirects **manually** (not via a library flag) so
+   every redirect target — not just the starting URL — is checked against the SSRF guard
+   below before being fetched.
+2. Parses the HTML with BeautifulSoup, looking for `<a>`/`<form>` elements with
+   application-related text (`Apply Now`, `Apply Here`, `Careers`, ...), ranked by how
+   strong/specific the wording is, while ignoring social-media links and nav/legal text
+   (WhatsApp, Telegram, "privacy", "home", ...).
+3. If the page looks JavaScript-rendered (very little visible text plus several `<script>`
+   tags and no real links) **and only then**, falls back to rendering it with Playwright and
+   re-scanning the result. Playwright is never the default path for a normal page.
+4. Repeats until it finds a page with no further application link, or hits
+   `MAX_RESOLUTION_DEPTH` hops (default 5, configurable), a URL loop, a timeout, or an unsafe
+   redirect target.
 
 Test it directly, independent of Telegram/Supabase:
 
@@ -269,8 +361,6 @@ curl -X POST http://localhost:8000/api/resolve-url \
   -H "Content-Type: application/json" \
   -d '{"url": "https://www.fresheroffcampus.com/clarivate-off-campus/"}'
 ```
-
-Response shape:
 
 ```json
 {
@@ -284,227 +374,95 @@ Response shape:
 }
 ```
 
-`resolution_status` is one of `resolved`, `no_next_link` (stopped at the original URL — no
-apply link was found on it), `max_depth_reached`, `loop_detected`, `http_error`, `timeout`,
-`blocked` (SSRF guard), `invalid_url`, or `resolution_error`. `final_url_confidence` is
-`"high"` when the final URL looks like a known ATS (Greenhouse, Lever, Workday, etc.) or a
-`careers.*`/`jobs.*` domain, `"low"` otherwise — this is a heuristic, not a guarantee.
+`resolution_status`: `resolved` (followed one or more hops to a stable page), `no_next_link`
+(the *original* URL had no apply link — nothing to follow), `max_depth_reached`,
+`loop_detected`, `http_error`, `timeout`, `blocked` (SSRF guard tripped), `invalid_url`, or
+`resolution_error`. `final_url_confidence` is `"high"` when the final URL looks like a known
+ATS (Greenhouse, Lever, Workday, ...) or a `careers.*`/`jobs.*` domain, `"low"` otherwise —
+a heuristic, not a guarantee; the resolver deliberately never claims certainty it doesn't have.
 
-Run its test suite (mocks all HTTP with `httpx.MockTransport`, so no real network calls or a
-Playwright browser install are needed):
+Response bodies are capped at 2MB while streaming, and requests use short connect/read
+timeouts — a slow or huge page can't hang the resolver indefinitely.
+
+## 14. Running tests
+
+Backend (from `backend/`, venv active):
 
 ```bash
+pip install -r requirements-dev.txt   # once
+pytest                                  # whole suite — no real Telegram/Supabase needed
+pytest tests/test_job_detection.py tests/test_job_detection_format_variations.py -v
+pytest tests/test_channel_service.py -v
 pytest tests/test_url_resolver.py -v
-```
-
-**Playwright browser (optional):** the JS-rendering fallback only activates for pages that
-look script-heavy with no real content; without a browser installed it just skips that step
-and stops at `no_next_link` instead of erroring. To enable it:
-
-```bash
-playwright install chromium
-```
-
-**Known limitations:**
-
-- SSRF protection blocks literal localhost/private/loopback IPs and `.local` hostnames, but
-  does **not** resolve DNS — a public hostname that resolves to a private IP (DNS rebinding)
-  is not caught. Acceptable for this personal, non-public-facing app; revisit if it's ever
-  exposed beyond localhost.
-- Company/apply-link heuristics are tuned against representative examples, not your actual
-  channels — expect to adjust `STRONG_APPLY_PHRASES`/`AVOID_TEXT_KEYWORDS`/`KNOWN_ATS_DOMAINS`
-  once you see it running against real intermediate sites.
-- `original_apply_url` resolution is sequential per fetch call (one job after another), which
-  is fine at personal-project volume but would need batching/concurrency at larger scale.
-
-## Job storage
-
-The `jobs` table already had every column the job pipeline produces (created back in Section
-2/4) — no schema changes were needed for this section.
-
-`POST /api/telegram/fetch` accepts a `save_jobs: true` flag; when set, every successfully
-detected job (after optional URL resolution) is inserted into Supabase individually. A job
-that fails to save (bad data, Supabase hiccup) is recorded in that job's `saved: false` and in
-the fetch's `errors`, but does **not** stop the rest of the batch — verified with a test where
-one job out of three fails to insert while the other two still succeed. `fetch_runs.jobs_saved`
-reflects how many actually persisted.
-
-```bash
-curl -X POST http://localhost:8000/api/telegram/fetch \
-  -H "Content-Type: application/json" \
-  -d '{"date": "2026-09-15", "resolve_urls": true, "save_jobs": true}'
-```
-
-Read them back:
-
-```bash
-curl "http://localhost:8000/api/jobs?date=2026-09-15&company=Clarivate&location=Chennai"
-curl http://localhost:8000/api/jobs/<job-id>
-```
-
-`GET /api/jobs` filters by `date` (matched against `posted_at`'s day), `company` and
-`location` (case-insensitive partial match), and supports `limit`/`offset` pagination.
-`GET /api/jobs/{id}` returns 404 if the job doesn't exist.
-
-`original_apply_url` and `final_apply_url` are always stored as separate columns — saving
-never overwrites one with the other, and `null` is stored (not a guessed value) for anything
-extraction couldn't determine. No deduplication is performed: fetching and saving the same
-message twice inserts two rows (the `content_hash` column exists in the schema but is
-intentionally unused until a future section).
-
-Run the storage tests (mocked Supabase client, no credentials needed):
-
-```bash
 pytest tests/test_job_service.py tests/test_message_service_storage.py tests/test_jobs_api.py -v
-```
-
-Use the **Jobs** tab in the frontend to browse persisted jobs with date/company/location
-filters. The **Fetch Test** tab has a "Save detected jobs to the database" checkbox so you can
-persist jobs from a real fetch run.
-
-**Known limitations:** filtering by `date` matches `posted_at` (the Telegram message's
-timestamp), not `discovered_at` (when JobRadar fetched it) — for the vast majority of cases
-these are the same day, but a message fetched shortly after midnight could technically have a
-`posted_at` from the previous day.
-
-## Fetch controls & status
-
-Only one fetch can run at a time (a simple in-process flag — this is a single-instance
-personal app, so no distributed locking is needed). Starting a second one while the first is
-still running returns:
-
-```bash
-curl -i -X POST http://localhost:8000/api/telegram/fetch -d '{}' -H "Content-Type: application/json"
-# HTTP/1.1 409 Conflict
-# {"detail": "A fetch is already running. Please wait for it to finish."}
-```
-
-Check the current state — useful after a page reload, since the frontend can't otherwise
-tell whether a fetch it started is still running:
-
-```bash
-curl http://localhost:8000/api/telegram/fetch/status
-```
-
-```json
-{
-  "state": "completed",
-  "last_run": {
-    "id": "...",
-    "requested_date": "2026-09-15",
-    "status": "completed",
-    "channels_processed": 3,
-    "messages_processed": 47,
-    "jobs_detected": 12,
-    "jobs_saved": 12,
-    "started_at": "2026-09-15T09:00:00+00:00",
-    "completed_at": "2026-09-15T09:00:42+00:00",
-    "errors": []
-  }
-}
-```
-
-`state` is one of `idle` (no fetch has run yet), `running`, `completed`, `partial`
-(`completed_with_errors` — some channels/jobs failed but the run finished), or `failed`
-(couldn't even get started, e.g. Telegram unauthenticated). List recent runs:
-
-```bash
-curl "http://localhost:8000/api/fetch-runs?limit=10"
-```
-
-Error messages throughout the pipeline are converted to plain language before reaching the
-API/frontend (e.g. `"Unable to access channel @example."`,
-`"Telegram authentication is unavailable. Run the login script first."`,
-`"Timed out while resolving an application URL."`) — raw exceptions stay in the backend logs
-only.
-
-Run the new tests:
-
-```bash
 pytest tests/test_fetch_controls.py -v
 ```
 
-In the frontend, the Dashboard's fetch panel shows the live state (including a **Retry**
-button after a failure/partial run) and polls `/api/telegram/fetch/status` if it detects a
-fetch already running on load. The **Fetch History** tab lists recent runs in a table, with
-per-run error detail available on click.
+Every test mocks Supabase (a hand-rolled fake client in `tests/fakes.py`), Telegram
+(`unittest.mock`), and HTTP (`httpx.MockTransport`) — none require real credentials, network
+access, or a Playwright browser install.
 
-**Known limitation:** the "only one fetch at a time" guard is per-process. If you ever run
-multiple backend worker processes (e.g. `uvicorn --workers 2`), each would enforce it
-independently rather than against each other — fine for the single-worker personal setup this
-app assumes, but worth knowing before changing that.
-
-## Frontend setup
+Frontend (from `frontend/`):
 
 ```bash
-cd frontend
-npm install
-copy .env.example .env       # Windows; use `cp` on macOS/Linux
+npm run build   # catches compile errors
+npm run lint    # oxlint
 ```
 
-Run it:
+There is no frontend automated test suite; UI behavior is verified manually against a running
+backend (see the acceptance checklist below) and, for API-contract-level correctness, by the
+backend's own route-level tests (`test_jobs_api.py`, `test_fetch_controls.py`).
 
-```bash
-npm run dev
-```
+## 15. Known limitations
 
-Opens on `http://localhost:5173`. All backend calls go through `frontend/src/services/api.js`
-(using the `VITE_API_BASE_URL` env variable) — no raw `fetch()` calls in components.
+- **SSRF protection is IP-literal only.** `is_safe_url()` blocks `localhost`, `.local`, and
+  literal private/loopback/link-local IPs (including on every redirect hop, not just the
+  starting URL), but it does not resolve hostnames — a public hostname that resolves to a
+  private IP (DNS rebinding) is not caught. Acceptable for this personal, non-public-facing
+  app; revisit before ever exposing it beyond localhost.
+- **No authentication anywhere.** Every endpoint (including `/api/resolve-url`, which makes
+  arbitrary outbound HTTP requests on request) is reachable by anyone who can reach the
+  backend port. This is intentional for a single-user local tool — do not put this backend on
+  the open internet without adding auth in front of it.
+- **Job detection and URL-resolution heuristics are tuned on synthetic examples**, not your
+  actual channels. Expect to adjust `job_detection.py`'s keyword lists/threshold and
+  `url_resolver.py`'s `STRONG_APPLY_PHRASES`/`KNOWN_ATS_DOMAINS` after seeing real traffic. A
+  known gap: a bare "`<Role> opening at <Company>`" post with no hiring keyword, no labeled
+  fields, and no structured context can fall just under the detection threshold — realistic
+  posts almost always include at least one labeled field (location/experience/etc.), which
+  resolves this in practice.
+- **Date filtering uses `posted_at`** (the Telegram message's own timestamp), not
+  `discovered_at` (when JobRadar fetched it) — the same day in the vast majority of cases, but
+  a message posted just before midnight and fetched just after could land on the "wrong"
+  day's filter.
+- **The "one fetch at a time" guard is per-process.** Fine for the single-worker setup this
+  app assumes; running multiple `uvicorn --workers N` processes would let each enforce it
+  independently rather than against each other.
+- **No deduplication.** Fetching and saving the same Telegram message twice creates two
+  separate job rows. Deferred by design (see `docs/spec.md`).
+- **No scheduling.** Fetching is always manually triggered; there is no background/cron job.
+- **URL resolution is sequential**, one job after another within a fetch — fine at personal
+  volume, would need batching/concurrency at larger scale.
+- **No frontend automated tests** — see §14.
 
-### Dashboard tab
+## 16. Security notes
 
-The primary workflow: pick a date, click **Fetch Messages** (runs the full
-fetch → detect → resolve → save pipeline and reloads the jobs list), then browse job cards —
-click **View details** for the full extracted fields, Telegram source link, and both apply
-URLs, or **Apply Now** to open `final_apply_url` (falling back to `original_apply_url`) in a
-new tab. The header shows a live Telegram connection dot; when disconnected it tells you to
-run the login script rather than trying to authenticate from the browser. Company/location
-filters query the API directly; experience/employment-type filters narrow the already-loaded
-list client-side (the jobs API doesn't support server-side filtering on those fields).
-
-Below the header, a status panel shows the current/last fetch state (idle, fetching,
-completed, partial, or failed), the message/job counts, any errors, and a **Retry** button
-after a failed or partial run. The date picker defaults to today in your browser's local
-time zone (fixed a real UTC-conversion bug here — `Date#toISOString()` shifts near midnight
-depending on the visitor's offset).
-
-### Channels tab
-
-Unchanged from Section 4 — add/enable/disable/revalidate/delete Telegram channels.
-
-### Fetch History tab
-
-A table of the most recent fetch runs (date, status, messages, jobs detected/saved,
-started/completed times), with a click-to-expand error list per run.
-
-### Debug: Fetch Test tab
-
-Unchanged from Sections 5-7 — lets you inspect raw fetched messages, per-channel
-success/failure, and toggle URL resolution independently of saving. Useful while tuning the
-job-detection/resolver heuristics against real channel data.
-
-## Environment variables
-
-`backend/.env.example`:
-
-```text
-BACKEND_HOST=127.0.0.1
-BACKEND_PORT=8000
-FRONTEND_URL=http://localhost:5173
-SUPABASE_URL=
-SUPABASE_KEY=
-TELEGRAM_API_ID=
-TELEGRAM_API_HASH=
-TELEGRAM_PHONE=
-TELEGRAM_SESSION_NAME=jobradar
-APP_TIMEZONE=UTC
-MAX_RESOLUTION_DEPTH=5
-```
-
-`frontend/.env.example`:
-
-```text
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-Never commit real `.env` files — only the `.env.example` templates are tracked.
+- **CORS** is restricted to the single configured `FRONTEND_URL` origin (`allow_origins=[...]`,
+  never `["*"]`).
+- **Secrets** (`SUPABASE_KEY`, `TELEGRAM_API_HASH`, etc.) live only in `backend/.env`, which is
+  git-ignored; nothing in the codebase logs or returns them in an API response (verified: no
+  log statement references credentials, session content, login codes, or 2FA passwords).
+- **The Telegram session file** (`backend/*.session`) grants full account access without
+  needing the login code again — it's git-ignored and was never committed (checked against the
+  full git history, not just the current working tree).
+- **Errors are converted to plain-language messages** before reaching any API response; raw
+  Python exceptions/stack traces are never returned to a client (verified for every route —
+  see §2/§12).
+- **The URL resolver fetches arbitrary user/Telegram-supplied URLs** by design (that's its
+  job). It only allows `http`/`https`, blocks literal localhost/private/loopback targets on
+  every hop (including redirects — see §15's DNS-rebinding caveat), caps response size, and
+  bounds hops/timeouts so it can't hang or be used to scan your local network via a
+  public-looking URL that happens to redirect internally.
+- **No authentication layer** exists anywhere in this app (see §15) — this is a deliberate
+  scope decision for a personal, localhost-only tool, not an oversight. Do not deploy this
+  backend to a shared or public host as-is.

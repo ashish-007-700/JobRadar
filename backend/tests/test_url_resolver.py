@@ -154,6 +154,36 @@ async def test_redirect_chain_is_recorded():
     assert final in result["redirect_chain"]
 
 
+@pytest.mark.asyncio
+async def test_redirect_to_private_ip_is_blocked_not_followed():
+    # A "safe" public-looking URL that 302s to an internal address must not be
+    # fetched — httpx's own follow_redirects=True would happily do this since it
+    # has no hook for our safety check on intermediate hops.
+    start = "https://short.link/abc"
+    internal = "http://169.254.169.254/latest/meta-data/"
+    pages = {start: httpx.Response(302, headers={"location": internal})}
+
+    async with make_client(pages) as client:
+        result = await resolve_apply_url(start, client=client)
+
+    assert result["resolution_status"] == ResolutionStatus.BLOCKED
+    assert internal not in result["redirect_chain"]
+
+
+@pytest.mark.asyncio
+async def test_too_many_redirects_in_a_single_hop_is_handled():
+    urls = [f"https://redirect-chain.com/{i}" for i in range(url_resolver.MAX_REDIRECTS_PER_HOP + 3)]
+    pages = {}
+    for i in range(len(urls) - 1):
+        pages[urls[i]] = httpx.Response(302, headers={"location": urls[i + 1]})
+    pages[urls[-1]] = html_response("<p>End.</p>")
+
+    async with make_client(pages) as client:
+        result = await resolve_apply_url(urls[0], client=client)
+
+    assert result["resolution_status"] == ResolutionStatus.HTTP_ERROR
+
+
 # 7. Loop detection ---------------------------------------------------------------------
 
 

@@ -107,5 +107,7 @@ def get_job(job_id: str) -> dict | None:
     try:
         result = client.table("jobs").select("*").eq("id", job_id).execute()
     except APIError as exc:
+        if exc.code == "22P02":  # invalid input syntax, e.g. a malformed UUID
+            raise JobStorageError(f"Invalid job id '{job_id}'.", status_code=400) from exc
         raise JobStorageError(str(exc), status_code=500) from exc
     return result.data[0] if result.data else None

@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services import job_service
+from app.services.job_service import JobStorageError
 
 client = TestClient(app)
 
@@ -67,3 +68,14 @@ def test_get_job_endpoint_not_found(monkeypatch):
     response = client.get("/api/jobs/missing")
 
     assert response.status_code == 404
+
+
+def test_get_job_endpoint_invalid_id_returns_400(monkeypatch):
+    def raise_invalid_id(job_id):
+        raise JobStorageError(f"Invalid job id '{job_id}'.", status_code=400)
+
+    monkeypatch.setattr(job_service, "get_job", raise_invalid_id)
+
+    response = client.get("/api/jobs/not-a-uuid")
+
+    assert response.status_code == 400

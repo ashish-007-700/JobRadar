@@ -4,35 +4,7 @@ import pytest
 
 from app.services import job_service
 from app.services.job_service import JobStorageError
-
-
-class FakeQuery:
-    def __init__(self, execute_result, calls):
-        self._execute_result = execute_result
-        self._calls = calls
-
-    def __getattr__(self, name):
-        def method(*args, **kwargs):
-            self._calls.append((name, args, kwargs))
-            return self
-
-        return method
-
-    def execute(self):
-        self._calls.append(("execute", (), {}))
-        if isinstance(self._execute_result, Exception):
-            raise self._execute_result
-        return self._execute_result
-
-
-class FakeSupabaseClient:
-    def __init__(self, execute_result):
-        self.execute_result = execute_result
-        self.calls = []
-
-    def table(self, name):
-        self.calls.append(("table", (name,), {}))
-        return FakeQuery(self.execute_result, self.calls)
+from tests.fakes import FakeSupabaseClient
 
 
 def make_job(**overrides) -> dict:
@@ -202,6 +174,18 @@ def test_get_job_not_found(monkeypatch):
     monkeypatch.setattr(job_service, "_get_client", lambda: fake_client)
 
     assert job_service.get_job("missing") is None
+
+
+def test_get_job_invalid_id_returns_400_not_500(monkeypatch):
+    from postgrest.exceptions import APIError
+
+    malformed_uuid_error = APIError({"message": "invalid input syntax for type uuid", "code": "22P02"})
+    fake_client = FakeSupabaseClient(malformed_uuid_error)
+    monkeypatch.setattr(job_service, "_get_client", lambda: fake_client)
+
+    with pytest.raises(JobStorageError) as exc_info:
+        job_service.get_job("not-a-uuid")
+    assert exc_info.value.status_code == 400
 
 
 # 14. No accidental deduplication ------------------------------------------------------

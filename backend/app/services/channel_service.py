@@ -82,7 +82,10 @@ async def resolve_channel(username: str) -> dict:
 
 async def list_channels() -> list[dict]:
     client = get_supabase_client()
-    result = client.table("channels").select("*").order("created_at", desc=True).execute()
+    try:
+        result = client.table("channels").select("*").order("created_at", desc=True).execute()
+    except APIError as exc:
+        raise ChannelValidationError(str(exc), status_code=502) from exc
     return result.data
 
 
@@ -113,9 +116,18 @@ async def create_channel(raw_input: str) -> dict:
     return result.data[0]
 
 
+def _raise_for_api_error(exc: APIError, channel_id: str) -> None:
+    if exc.code == "22P02":  # invalid input syntax, e.g. a malformed UUID
+        raise ChannelValidationError(f"Invalid channel id '{channel_id}'.", status_code=400) from exc
+    raise ChannelValidationError(str(exc), status_code=502) from exc
+
+
 async def update_channel_enabled(channel_id: str, enabled: bool) -> dict:
     client = get_supabase_client()
-    result = client.table("channels").update({"enabled": enabled}).eq("id", channel_id).execute()
+    try:
+        result = client.table("channels").update({"enabled": enabled}).eq("id", channel_id).execute()
+    except APIError as exc:
+        _raise_for_api_error(exc, channel_id)
     if not result.data:
         raise ChannelValidationError("Channel not found.", status_code=404)
     return result.data[0]
@@ -123,14 +135,20 @@ async def update_channel_enabled(channel_id: str, enabled: bool) -> dict:
 
 async def delete_channel(channel_id: str) -> None:
     client = get_supabase_client()
-    result = client.table("channels").delete().eq("id", channel_id).execute()
+    try:
+        result = client.table("channels").delete().eq("id", channel_id).execute()
+    except APIError as exc:
+        _raise_for_api_error(exc, channel_id)
     if not result.data:
         raise ChannelValidationError("Channel not found.", status_code=404)
 
 
 async def revalidate_channel(channel_id: str) -> dict:
     client = get_supabase_client()
-    result = client.table("channels").select("*").eq("id", channel_id).execute()
+    try:
+        result = client.table("channels").select("*").eq("id", channel_id).execute()
+    except APIError as exc:
+        _raise_for_api_error(exc, channel_id)
     if not result.data:
         raise ChannelValidationError("Channel not found.", status_code=404)
     channel = result.data[0]
@@ -149,7 +167,11 @@ async def revalidate_channel(channel_id: str) -> dict:
         updates["channel_name"] = resolved["channel_name"]
 
     if updates:
-        update_result = client.table("channels").update(updates).eq("id", channel_id).execute()
-        channel = update_result.data[0]
+        try:
+            update_result = client.table("channels").update(updates).eq("id", channel_id).execute()
+        except APIError as exc:
+            raise ChannelValidationError(str(exc), status_code=502) from exc
+        if update_result.data:
+            channel = update_result.data[0]
 
     return {"accessible": True, "channel": channel}

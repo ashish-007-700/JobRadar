@@ -24,7 +24,6 @@ async def connect() -> None:
 
 
 async def disconnect() -> None:
-    global _client
     if _client is not None and _client.is_connected():
         await _client.disconnect()
 

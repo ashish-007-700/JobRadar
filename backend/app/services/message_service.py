@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
+from postgrest.exceptions import APIError
 from telethon.errors import RPCError
 
 from app.config import APP_TIMEZONE
@@ -81,17 +82,26 @@ async def _fetch_channel_messages(client, channel: dict, start_utc: datetime, en
 
 def _create_fetch_run(requested_date: date_cls) -> dict:
     client = get_supabase_client()
-    result = (
-        client.table("fetch_runs")
-        .insert({"requested_date": requested_date.isoformat(), "status": "running"})
-        .execute()
-    )
+    try:
+        result = (
+            client.table("fetch_runs")
+            .insert({"requested_date": requested_date.isoformat(), "status": "running"})
+            .execute()
+        )
+    except APIError as exc:
+        raise FetchValidationError(str(exc), status_code=502) from exc
     return result.data[0]
 
 
 def _finish_fetch_run(run_id: str, **fields) -> None:
-    client = get_supabase_client()
-    client.table("fetch_runs").update(fields).eq("id", run_id).execute()
+    # Recording the outcome is bookkeeping, not the result itself: if Supabase
+    # hiccups here, log it but still let the caller return the real fetch
+    # result/error to the user instead of masking it with this failure.
+    try:
+        client = get_supabase_client()
+        client.table("fetch_runs").update(fields).eq("id", run_id).execute()
+    except (RuntimeError, APIError) as exc:
+        logger.warning("Failed to update fetch_runs %s: %s", run_id, exc)
 
 
 async def _resolve_job_urls(jobs: list[dict]) -> list[dict]:

@@ -55,6 +55,16 @@ function Dashboard() {
     experience: '',
     employmentType: '',
   })
+  // Company/location hit the API server-side; debounce so typing doesn't fire
+  // a request per keystroke. Experience/employment-type filter client-side
+  // (see visibleJobs below) and don't need debouncing.
+  const [serverFilters, setServerFilters] = useState({ company: '', location: '' })
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setServerFilters({ company: filters.company, location: filters.location })
+    }, 400)
+    return () => clearTimeout(timeout)
+  }, [filters.company, filters.location])
 
   const [fetchState, setFetchState] = useState('idle')
   const [fetchError, setFetchError] = useState(null)
@@ -89,8 +99,8 @@ function Dashboard() {
     try {
       const data = await listJobs({
         date,
-        company: filters.company || undefined,
-        location: filters.location || undefined,
+        company: serverFilters.company || undefined,
+        location: serverFilters.location || undefined,
       })
       setJobs(data)
     } catch (err) {
@@ -103,7 +113,7 @@ function Dashboard() {
   useEffect(() => {
     loadJobs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, filters.company, filters.location])
+  }, [date, serverFilters.company, serverFilters.location])
 
   // If a fetch is already running (e.g. detected on page load), poll until it
   // finishes rather than pretending to show real-time progress.

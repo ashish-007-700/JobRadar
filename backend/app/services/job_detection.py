@@ -20,6 +20,9 @@ HIRING_KEYWORDS = [
     "we are hiring",
     "career opportunity",
     "immediate joining",
+    "internship program",
+    "trainee program",
+    "graduate program",
 ]
 
 ROLE_KEYWORDS = [

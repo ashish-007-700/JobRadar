@@ -18,6 +18,8 @@ DEFAULT_HEADERS = {
 }
 REQUEST_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB, avoid downloading huge/non-HTML bodies
+MAX_REDIRECTS_PER_HOP = 10
+REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
 
 TRACKING_PARAMS = {
     "utm_source",
@@ -92,6 +94,16 @@ KNOWN_ATS_DOMAINS = [
     "ashbyhq.com",
     "workable.com",
 ]
+
+
+class UnsafeRedirectError(Exception):
+    def __init__(self, url: str):
+        super().__init__(f"Redirect target blocked by SSRF policy: {url}")
+        self.url = url
+
+
+class TooManyRedirectsError(Exception):
+    pass
 
 
 class ResolutionStatus:
@@ -234,27 +246,45 @@ async def _fetch_rendered_html(url: str) -> str | None:
 
 
 async def _fetch_page(client: httpx.AsyncClient, url: str) -> tuple[str, str, list[str], int]:
-    async with client.stream(
-        "GET", url, headers=DEFAULT_HEADERS, timeout=REQUEST_TIMEOUT, follow_redirects=True
-    ) as response:
-        redirect_urls = [str(r.url) for r in response.history]
-        if response.status_code >= 400:
-            return str(response.url), "", redirect_urls, response.status_code
+    # Redirects are followed manually (not via httpx's follow_redirects=True) so
+    # every intermediate hop — not just the initial URL — passes is_safe_url().
+    # httpx's built-in redirect following has no hook for that: a "safe" URL
+    # could 302 straight to a private/loopback address and httpx would fetch it
+    # without ever asking us.
+    redirect_urls: list[str] = []
+    current_url = url
 
-        content_type = response.headers.get("content-type", "")
-        if content_type and "text/html" not in content_type:
-            return str(response.url), "", redirect_urls, response.status_code
+    for _ in range(MAX_REDIRECTS_PER_HOP + 1):
+        if not is_safe_url(current_url):
+            raise UnsafeRedirectError(current_url)
 
-        chunks = []
-        total = 0
-        async for chunk in response.aiter_bytes():
-            total += len(chunk)
-            chunks.append(chunk)
-            if total > MAX_RESPONSE_BYTES:
-                break
-        body = b"".join(chunks)
-        text = body.decode(response.encoding or "utf-8", errors="replace")
-        return str(response.url), text, redirect_urls, response.status_code
+        async with client.stream(
+            "GET", current_url, headers=DEFAULT_HEADERS, timeout=REQUEST_TIMEOUT, follow_redirects=False
+        ) as response:
+            if response.status_code in REDIRECT_STATUS_CODES and "location" in response.headers:
+                redirect_urls.append(str(response.url))
+                current_url = normalize_url(response.headers["location"], base=str(response.url))
+                continue
+
+            if response.status_code >= 400:
+                return str(response.url), "", redirect_urls, response.status_code
+
+            content_type = response.headers.get("content-type", "")
+            if content_type and "text/html" not in content_type:
+                return str(response.url), "", redirect_urls, response.status_code
+
+            chunks = []
+            total = 0
+            async for chunk in response.aiter_bytes():
+                total += len(chunk)
+                chunks.append(chunk)
+                if total > MAX_RESPONSE_BYTES:
+                    break
+            body = b"".join(chunks)
+            text = body.decode(response.encoding or "utf-8", errors="replace")
+            return str(response.url), text, redirect_urls, response.status_code
+
+    raise TooManyRedirectsError(f"Exceeded {MAX_REDIRECTS_PER_HOP} redirects")
 
 
 def _result(original: str, final: str, status: str, chain: list[str], steps: int, error: str | None) -> dict:
@@ -298,6 +328,10 @@ async def _resolve_with_client(client: httpx.AsyncClient, original_url: str) -> 
 
         try:
             effective_url, html_text, redirects, status_code = await _fetch_page(client, current)
+        except UnsafeRedirectError as exc:
+            return _result(original_url, last_reached, ResolutionStatus.BLOCKED, redirect_chain, hop, str(exc))
+        except TooManyRedirectsError as exc:
+            return _result(original_url, last_reached, ResolutionStatus.HTTP_ERROR, redirect_chain, hop, str(exc))
         except httpx.TimeoutException:
             return _result(original_url, last_reached, ResolutionStatus.TIMEOUT, redirect_chain, hop, "Request timed out")
         except httpx.HTTPError as exc:
