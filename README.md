@@ -27,8 +27,13 @@ See [`docs/spec.md`](docs/spec.md) for the full project specification.
   title, location, experience, qualification, batch, salary, skills, employment type,
   original apply URL). Detected jobs are returned by the fetch endpoint but **not** saved to
   Supabase yet.
+- **Section 7 — Application URL resolver:** Follows a job's `original_apply_url` through
+  intermediate pages (HTTP redirects, HTML apply-link following, a Playwright fallback for
+  JS-heavy pages) to a likely `final_apply_url`, with depth/loop limits and basic SSRF
+  protection. Exposed standalone at `POST /api/resolve-url`, and optionally wired into
+  `POST /api/telegram/fetch` via `resolve_urls: true`.
 
-URL resolution and job storage are **not** implemented yet — they belong to later sections.
+Job storage is **not** implemented yet — that's Section 8.
 
 ## Required software
 
@@ -187,6 +192,7 @@ Response shape:
       "skills": null,
       "employment_type": null,
       "original_apply_url": "https://www.fresheroffcampus.com/clarivate-off-campus/",
+      "final_apply_url": null,
       "telegram_message_id": 123,
       "telegram_channel": "fresheroffcampus",
       "telegram_message_url": "https://t.me/fresheroffcampus/123",
@@ -212,7 +218,71 @@ pytest tests/test_job_detection.py -v
 
 Use the **Fetch Test** tab in the frontend to pick a date, run a fetch, see per-channel
 counts, browse detected jobs as cards, and expand each job's (or any raw message's) full JSON
-for debugging.
+for debugging. Check "Resolve apply URLs" there to also run each detected job's
+`original_apply_url` through the resolver below (slower, since it makes real HTTP requests).
+
+## Application URL resolver
+
+Given a job's initial "Apply Now" link, `backend/app/services/url_resolver.py` follows HTTP
+redirects and HTML "Apply"-style links (via httpx + BeautifulSoup) — falling back to
+Playwright only when a page looks JS-rendered (little visible text, several `<script>` tags
+and no plain links) — until it reaches a page with no further application link, or a
+configurable hop limit (`MAX_RESOLUTION_DEPTH`, default 5) is hit.
+
+Test it directly, independent of Telegram/Supabase:
+
+```bash
+curl -X POST http://localhost:8000/api/resolve-url \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.fresheroffcampus.com/clarivate-off-campus/"}'
+```
+
+Response shape:
+
+```json
+{
+  "original_apply_url": "https://www.fresheroffcampus.com/clarivate-off-campus/",
+  "final_apply_url": "https://careers.clarivate.com/job/12345",
+  "resolution_status": "resolved",
+  "redirect_chain": ["https://www.fresheroffcampus.com/clarivate-off-campus/", "..."],
+  "steps_followed": 1,
+  "error": null,
+  "final_url_confidence": "high"
+}
+```
+
+`resolution_status` is one of `resolved`, `no_next_link` (stopped at the original URL — no
+apply link was found on it), `max_depth_reached`, `loop_detected`, `http_error`, `timeout`,
+`blocked` (SSRF guard), `invalid_url`, or `resolution_error`. `final_url_confidence` is
+`"high"` when the final URL looks like a known ATS (Greenhouse, Lever, Workday, etc.) or a
+`careers.*`/`jobs.*` domain, `"low"` otherwise — this is a heuristic, not a guarantee.
+
+Run its test suite (mocks all HTTP with `httpx.MockTransport`, so no real network calls or a
+Playwright browser install are needed):
+
+```bash
+pytest tests/test_url_resolver.py -v
+```
+
+**Playwright browser (optional):** the JS-rendering fallback only activates for pages that
+look script-heavy with no real content; without a browser installed it just skips that step
+and stops at `no_next_link` instead of erroring. To enable it:
+
+```bash
+playwright install chromium
+```
+
+**Known limitations:**
+
+- SSRF protection blocks literal localhost/private/loopback IPs and `.local` hostnames, but
+  does **not** resolve DNS — a public hostname that resolves to a private IP (DNS rebinding)
+  is not caught. Acceptable for this personal, non-public-facing app; revisit if it's ever
+  exposed beyond localhost.
+- Company/apply-link heuristics are tuned against representative examples, not your actual
+  channels — expect to adjust `STRONG_APPLY_PHRASES`/`AVOID_TEXT_KEYWORDS`/`KNOWN_ATS_DOMAINS`
+  once you see it running against real intermediate sites.
+- `original_apply_url` resolution is sequential per fetch call (one job after another), which
+  is fine at personal-project volume but would need batching/concurrency at larger scale.
 
 ## Frontend setup
 
@@ -247,6 +317,7 @@ TELEGRAM_API_HASH=
 TELEGRAM_PHONE=
 TELEGRAM_SESSION_NAME=jobradar
 APP_TIMEZONE=UTC
+MAX_RESOLUTION_DEPTH=5
 ```
 
 `frontend/.env.example`:

@@ -27,3 +27,6 @@ TELEGRAM_SESSION_PATH = str(BACKEND_DIR / TELEGRAM_SESSION_NAME)
 # Timezone used to interpret "requested date" for message fetching, so a day
 # boundary matches the user's local day rather than UTC's.
 APP_TIMEZONE = os.getenv("APP_TIMEZONE", "UTC")
+
+# Maximum number of hops the application-URL resolver will follow.
+MAX_RESOLUTION_DEPTH = int(os.getenv("MAX_RESOLUTION_DEPTH", "5"))

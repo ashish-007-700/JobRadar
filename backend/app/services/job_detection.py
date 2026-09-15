@@ -115,6 +115,7 @@ class ExtractedJob:
     skills: list[str] | None
     employment_type: str | None
     original_apply_url: str | None
+    final_apply_url: str | None
     telegram_message_id: int
     telegram_channel: str
     telegram_message_url: str
@@ -265,6 +266,7 @@ def process_message(message: dict) -> dict | None:
         skills=extract_skills(text),
         employment_type=extract_employment_type(text),
         original_apply_url=extract_apply_url(text),
+        final_apply_url=None,
         telegram_message_id=message["message_id"],
         telegram_channel=message["channel_username"],
         telegram_message_url=message["message_url"],

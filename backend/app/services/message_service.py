@@ -3,10 +3,11 @@ from datetime import date as date_cls
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import httpx
 from telethon.errors import RPCError
 
 from app.config import APP_TIMEZONE
-from app.services import channel_service, job_detection, telegram_client
+from app.services import channel_service, job_detection, telegram_client, url_resolver
 from app.services.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,18 @@ def _finish_fetch_run(run_id: str, **fields) -> None:
     client.table("fetch_runs").update(fields).eq("id", run_id).execute()
 
 
-async def fetch_messages_for_date(date_str: str | None) -> dict:
+async def _resolve_job_urls(jobs: list[dict]) -> None:
+    async with httpx.AsyncClient() as client:
+        for job in jobs:
+            original_url = job.get("original_apply_url")
+            if not original_url:
+                continue
+            result = await url_resolver.resolve_apply_url(original_url, client=client)
+            job["final_apply_url"] = result["final_apply_url"]
+            job["resolution_status"] = result["resolution_status"]
+
+
+async def fetch_messages_for_date(date_str: str | None, resolve_urls: bool = False) -> dict:
     requested_date, start_utc, end_utc = _resolve_date_window(date_str)
 
     channels = await channel_service.list_channels()
@@ -140,6 +152,10 @@ async def fetch_messages_for_date(date_str: str | None) -> dict:
         len(detected_jobs),
         len(all_messages) - len(detected_jobs),
     )
+
+    if resolve_urls and detected_jobs:
+        await _resolve_job_urls(detected_jobs)
+        logger.info("Resolved apply URLs for %d detected jobs", len(detected_jobs))
 
     status = "completed_with_errors" if run_errors else "completed"
     _finish_fetch_run(

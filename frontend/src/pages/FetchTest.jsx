@@ -1,6 +1,15 @@
 import { useState } from 'react'
 import { fetchTelegramMessages } from '../services/api'
 
+function ResolveUrlsToggle({ checked, onChange }) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-gray-700">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      Resolve apply URLs (slower — fetches the application chain for each job)
+    </label>
+  )
+}
+
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10)
 }
@@ -48,6 +57,21 @@ function JobCard({ job, rawMessage }) {
           </a>
         </p>
       )}
+      {job.final_apply_url && job.final_apply_url !== job.original_apply_url && (
+        <p className="text-sm">
+          <a
+            href={job.final_apply_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-green-700 underline"
+          >
+            Final Apply URL
+          </a>{' '}
+          {job.resolution_status && (
+            <span className="text-xs text-gray-500">({job.resolution_status})</span>
+          )}
+        </p>
+      )}
 
       <button
         type="button"
@@ -67,6 +91,7 @@ function JobCard({ job, rawMessage }) {
 
 function FetchTest() {
   const [date, setDate] = useState(todayIsoDate())
+  const [resolveUrls, setResolveUrls] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
@@ -77,7 +102,7 @@ function FetchTest() {
     setError(null)
     setResult(null)
     try {
-      setResult(await fetchTelegramMessages(date))
+      setResult(await fetchTelegramMessages(date, resolveUrls))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -108,6 +133,10 @@ function FetchTest() {
         >
           {loading ? 'Fetching...' : 'Fetch Messages'}
         </button>
+      </div>
+
+      <div className="mt-2">
+        <ResolveUrlsToggle checked={resolveUrls} onChange={setResolveUrls} />
       </div>
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}

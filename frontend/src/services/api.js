@@ -41,10 +41,18 @@ export async function validateChannel(id) {
   return request(`/api/channels/${id}/validate`, { method: 'POST' })
 }
 
-export async function fetchTelegramMessages(date) {
+export async function fetchTelegramMessages(date, resolveUrls = false) {
   return request('/api/telegram/fetch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(date ? { date } : {}),
+    body: JSON.stringify({ ...(date ? { date } : {}), resolve_urls: resolveUrls }),
+  })
+}
+
+export async function resolveUrl(url) {
+  return request('/api/resolve-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
   })
 }
