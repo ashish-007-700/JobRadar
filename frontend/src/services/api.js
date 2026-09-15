@@ -78,6 +78,10 @@ export async function getJob(id) {
   return request(`/api/jobs/${id}`)
 }
 
+export async function deleteJobsForDate(date) {
+  return request(`/api/jobs?date=${encodeURIComponent(date)}`, { method: 'DELETE' })
+}
+
 export async function getFetchStatus() {
   return request('/api/telegram/fetch/status')
 }

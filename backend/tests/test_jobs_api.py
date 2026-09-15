@@ -50,6 +50,42 @@ def test_list_jobs_endpoint_forwards_filters(monkeypatch):
     assert captured["offset"] == 5
 
 
+# DELETE /api/jobs (reset for a date) ------------------------------------------------------
+
+
+def test_delete_jobs_endpoint_requires_date():
+    response = client.delete("/api/jobs")
+
+    assert response.status_code == 422  # FastAPI validation: date is a required query param
+
+
+def test_delete_jobs_endpoint_forwards_date_and_returns_count(monkeypatch):
+    captured = {}
+
+    def fake_delete(date):
+        captured["date"] = date
+        return 3
+
+    monkeypatch.setattr(job_service, "delete_jobs_for_date", fake_delete)
+
+    response = client.delete("/api/jobs?date=2026-09-15")
+
+    assert response.status_code == 200
+    assert response.json() == {"date": "2026-09-15", "deleted": 3}
+    assert captured["date"] == "2026-09-15"
+
+
+def test_delete_jobs_endpoint_invalid_date(monkeypatch):
+    def raise_invalid_date(date):
+        raise JobStorageError(f"Invalid date '{date}'. Use YYYY-MM-DD.", status_code=400)
+
+    monkeypatch.setattr(job_service, "delete_jobs_for_date", raise_invalid_date)
+
+    response = client.delete("/api/jobs?date=not-a-date")
+
+    assert response.status_code == 400
+
+
 # 13. GET /api/jobs/{id} --------------------------------------------------------------------
 
 

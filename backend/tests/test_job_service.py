@@ -157,6 +157,39 @@ def test_list_jobs_filters_by_location(monkeypatch):
     assert ("location", "%Bangalore%") in [call[1] for call in ilike_calls]
 
 
+# delete_jobs_for_date ----------------------------------------------------------------------
+
+
+def test_delete_jobs_for_date_returns_count(monkeypatch):
+    fake_client = FakeSupabaseClient(SimpleNamespace(data=[{"id": "1"}, {"id": "2"}]))
+    monkeypatch.setattr(job_service, "_get_client", lambda: fake_client)
+
+    deleted = job_service.delete_jobs_for_date("2026-09-15")
+
+    assert deleted == 2
+    gte_calls = [call for call in fake_client.calls if call[0] == "gte"]
+    lt_calls = [call for call in fake_client.calls if call[0] == "lt"]
+    assert gte_calls and gte_calls[0][1] == ("posted_at", "2026-09-15T00:00:00+00:00")
+    assert lt_calls and lt_calls[0][1] == ("posted_at", "2026-09-16T00:00:00+00:00")
+    assert any(call[0] == "delete" for call in fake_client.calls)
+
+
+def test_delete_jobs_for_date_rejects_invalid_date(monkeypatch):
+    fake_client = FakeSupabaseClient(SimpleNamespace(data=[]))
+    monkeypatch.setattr(job_service, "_get_client", lambda: fake_client)
+
+    with pytest.raises(JobStorageError) as exc_info:
+        job_service.delete_jobs_for_date("not-a-date")
+    assert exc_info.value.status_code == 400
+
+
+def test_delete_jobs_for_date_with_no_matches_returns_zero(monkeypatch):
+    fake_client = FakeSupabaseClient(SimpleNamespace(data=[]))
+    monkeypatch.setattr(job_service, "_get_client", lambda: fake_client)
+
+    assert job_service.delete_jobs_for_date("2026-09-15") == 0
+
+
 # 13. get_job -----------------------------------------------------------------------------
 
 
@@ -188,10 +221,13 @@ def test_get_job_invalid_id_returns_400_not_500(monkeypatch):
     assert exc_info.value.status_code == 400
 
 
-# 14. No accidental deduplication ------------------------------------------------------
+# 14. save_job() itself performs no deduplication ---------------------------------------
+# (Dedup is an orchestration-layer concern - see job_exists() below and
+# message_service._save_jobs, which checks job_exists() before calling save_job().
+# save_job() itself stays a pure insert with no dedup awareness.)
 
 
-def test_saving_the_same_job_twice_does_not_dedupe(monkeypatch):
+def test_save_job_itself_does_not_dedupe(monkeypatch):
     fake_client = FakeSupabaseClient(SimpleNamespace(data=[{"id": "job-x", **make_job()}]))
     monkeypatch.setattr(job_service, "_get_client", lambda: fake_client)
 
@@ -200,3 +236,24 @@ def test_saving_the_same_job_twice_does_not_dedupe(monkeypatch):
 
     insert_calls = [call for call in fake_client.calls if call[0] == "insert"]
     assert len(insert_calls) == 2
+
+
+# job_exists() ----------------------------------------------------------------------------
+
+
+def test_job_exists_true_when_found(monkeypatch):
+    fake_client = FakeSupabaseClient(SimpleNamespace(data=[{"id": "job-x"}]))
+    monkeypatch.setattr(job_service, "_get_client", lambda: fake_client)
+
+    assert job_service.job_exists("testchannel", 42) is True
+
+    eq_calls = [call for call in fake_client.calls if call[0] == "eq"]
+    assert ("telegram_channel", "testchannel") in [call[1] for call in eq_calls]
+    assert ("telegram_message_id", 42) in [call[1] for call in eq_calls]
+
+
+def test_job_exists_false_when_not_found(monkeypatch):
+    fake_client = FakeSupabaseClient(SimpleNamespace(data=[]))
+    monkeypatch.setattr(job_service, "_get_client", lambda: fake_client)
+
+    assert job_service.job_exists("testchannel", 42) is False

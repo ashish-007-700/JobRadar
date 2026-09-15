@@ -345,9 +345,17 @@ curl http://localhost:8000/api/jobs/<job-id>
 matches; `limit`/`offset` paginate. `GET /api/jobs/{id}` returns 404 for a missing job, 400
 for a malformed id. `original_apply_url` and `final_apply_url` are always stored as separate
 columns — saving never overwrites one with the other, and missing fields are stored as `null`
-rather than guessed. **No deduplication is performed anywhere in the pipeline** — fetching and
-saving the same message twice inserts two rows (the schema's `content_hash` column exists but
-is intentionally unused for now).
+rather than guessed.
+
+**Deduplication:** before saving a detected job, the backend checks whether a job with the
+same `telegram_channel` + `telegram_message_id` already exists (`job_service.job_exists()`)
+and skips it if so — the job is reported as `"saved": false, "duplicate": true` in the
+response rather than being silently dropped or re-inserted. This is an application-level
+check (a `SELECT` before the `INSERT`), not a database unique constraint or an upsert — kept
+intentionally simple. It only catches the *same* Telegram message fetched twice; it does
+**not** detect the same job posted independently across multiple channels, or reposted with
+different wording (that kind of cross-channel/fuzzy dedup remains out of scope). The schema's
+`content_hash` column still exists but is unused.
 
 ## 13. Understanding the application URL resolver
 
@@ -452,8 +460,9 @@ backend's own route-level tests (`test_jobs_api.py`, `test_fetch_controls.py`).
 - **The "one fetch at a time" guard is per-process.** Fine for the single-worker setup this
   app assumes; running multiple `uvicorn --workers N` processes would let each enforce it
   independently rather than against each other.
-- **No deduplication.** Fetching and saving the same Telegram message twice creates two
-  separate job rows. Deferred by design (see `docs/spec.md`).
+- **Dedup is exact-match only.** It catches the same Telegram message saved twice (by
+  `telegram_channel` + `telegram_message_id`), but not the same job posted independently
+  across multiple channels or reposted with different wording — see §12.
 - **No scheduling.** Fetching is always manually triggered; there is no background/cron job.
 - **URL resolution is sequential**, one job after another within a fetch — fine at personal
   volume, would need batching/concurrency at larger scale.

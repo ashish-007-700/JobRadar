@@ -23,6 +23,7 @@ function FetchStatusPanel({ state, lastRun, fetchError, onRetry }) {
         <p className="mt-1">
           {lastRun.messages_processed ?? 0} messages · {lastRun.jobs_detected ?? 0} jobs detected ·{' '}
           {lastRun.jobs_saved ?? 0} saved
+          {lastRun.jobs_duplicate > 0 && ` · ${lastRun.jobs_duplicate} already saved (skipped)`}
         </p>
       )}
 

@@ -126,18 +126,37 @@ async def _resolve_job_urls(jobs: list[dict]) -> list[dict]:
     return resolution_errors
 
 
-def _save_jobs(jobs: list[dict]) -> tuple[int, list[dict]]:
+def _save_jobs(jobs: list[dict]) -> tuple[int, int, list[dict]]:
     saved_count = 0
+    duplicate_count = 0
     save_errors = []
     for job in jobs:
+        channel = job.get("telegram_channel")
+        message_id = job.get("telegram_message_id")
+
+        try:
+            already_saved = channel and message_id is not None and job_service.job_exists(
+                channel, message_id
+            )
+        except JobStorageError:
+            # If the existence check itself fails, don't silently drop the
+            # job - fall through and attempt the insert anyway.
+            already_saved = False
+
+        if already_saved:
+            job["saved"] = False
+            job["duplicate"] = True
+            duplicate_count += 1
+            continue
+
         try:
             saved_row = job_service.save_job(job)
         except JobStorageError as exc:
             job["saved"] = False
             save_errors.append(
                 {
-                    "telegram_channel": job.get("telegram_channel"),
-                    "telegram_message_id": job.get("telegram_message_id"),
+                    "telegram_channel": channel,
+                    "telegram_message_id": message_id,
                     "detail": exc.message,
                 }
             )
@@ -145,7 +164,7 @@ def _save_jobs(jobs: list[dict]) -> tuple[int, list[dict]]:
             job["id"] = saved_row["id"]
             job["saved"] = True
             saved_count += 1
-    return saved_count, save_errors
+    return saved_count, duplicate_count, save_errors
 
 
 def _add_per_channel_job_stats(channel_results: list[dict], detected_jobs: list[dict]) -> None:
@@ -258,10 +277,16 @@ async def _run_fetch(date_str: str | None, resolve_urls: bool, save_jobs: bool) 
         logger.info("Resolved apply URLs for %d detected jobs", len(detected_jobs))
 
     jobs_saved = 0
+    jobs_duplicate = 0
     if save_jobs and detected_jobs:
-        jobs_saved, save_errors = _save_jobs(detected_jobs)
+        jobs_saved, jobs_duplicate, save_errors = _save_jobs(detected_jobs)
         run_errors.extend(save_errors)
-        logger.info("Saved %d/%d detected jobs", jobs_saved, len(detected_jobs))
+        logger.info(
+            "Saved %d/%d detected jobs (%d already saved previously)",
+            jobs_saved,
+            len(detected_jobs),
+            jobs_duplicate,
+        )
 
     _add_per_channel_job_stats(channel_results, detected_jobs)
 
@@ -284,6 +309,7 @@ async def _run_fetch(date_str: str | None, resolve_urls: bool, save_jobs: bool) 
         "messages_found": len(all_messages),
         "jobs_detected": len(detected_jobs),
         "jobs_saved": jobs_saved,
+        "jobs_duplicate": jobs_duplicate,
         "errors": run_errors,
         "channel_results": channel_results,
         "messages": all_messages,

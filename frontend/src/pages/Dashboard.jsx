@@ -6,6 +6,7 @@ import JobFilters from '../components/JobFilters'
 import SummaryStats from '../components/SummaryStats'
 import {
   checkTelegramHealth,
+  deleteJobsForDate,
   fetchTelegramMessages,
   getFetchStatus,
   listChannels,
@@ -27,6 +28,7 @@ function normalizeRun(result) {
     messages_processed: result.messages_found ?? result.messages_processed,
     jobs_detected: result.jobs_detected,
     jobs_saved: result.jobs_saved,
+    jobs_duplicate: result.jobs_duplicate,
     errors: result.errors,
   }
 }
@@ -69,6 +71,9 @@ function Dashboard() {
   const [fetchState, setFetchState] = useState('idle')
   const [fetchError, setFetchError] = useState(null)
   const [lastRun, setLastRun] = useState(null)
+
+  const [resetting, setResetting] = useState(false)
+  const [resetError, setResetError] = useState(null)
 
   useEffect(() => {
     checkTelegramHealth()
@@ -152,6 +157,27 @@ function Dashboard() {
     }
   }
 
+  const handleResetJobs = async () => {
+    const count = jobs.length
+    const confirmed = window.confirm(
+      count > 0
+        ? `Delete all ${count} job${count === 1 ? '' : 's'} saved for ${date}? This cannot be undone.`
+        : `There are no saved jobs for ${date} to delete.`
+    )
+    if (!confirmed || count === 0) return
+
+    setResetting(true)
+    setResetError(null)
+    try {
+      await deleteJobsForDate(date)
+      await loadJobs()
+    } catch (err) {
+      setResetError(err.message)
+    } finally {
+      setResetting(false)
+    }
+  }
+
   const visibleJobs = jobs.filter(
     (job) =>
       matchesClientFilter(job, 'experience', filters.experience) &&
@@ -187,11 +213,20 @@ function Dashboard() {
         />
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
         <JobFilters filters={filters} onChange={setFilters} />
+        <button
+          type="button"
+          onClick={handleResetJobs}
+          disabled={resetting || jobsLoading}
+          className="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-600 disabled:opacity-50"
+        >
+          {resetting ? 'Resetting...' : `Reset jobs for ${date}`}
+        </button>
       </div>
 
       <div className="mt-6">
+        {resetError && <p className="text-sm text-red-600">{resetError}</p>}
         {jobsLoading && <p className="text-sm text-gray-500">Loading jobs...</p>}
         {jobsError && <p className="text-sm text-red-600">{jobsError}</p>}
 

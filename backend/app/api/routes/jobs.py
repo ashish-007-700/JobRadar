@@ -20,6 +20,15 @@ async def list_jobs(
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
+@router.delete("/jobs")
+async def delete_jobs(date: str = Query(...)):
+    try:
+        deleted = job_service.delete_jobs_for_date(date)
+    except JobStorageError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return {"date": date, "deleted": deleted}
+
+
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str):
     try:

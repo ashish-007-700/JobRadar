@@ -35,7 +35,12 @@ function JobCard({ job, rawMessage }) {
       <p className="font-medium text-gray-900">
         {job.title || 'Untitled role'} {job.company ? `— ${job.company}` : ''}
         {job.saved === true && <span className="ml-2 text-xs font-normal text-green-700">Saved</span>}
-        {job.saved === false && <span className="ml-2 text-xs font-normal text-red-600">Save failed</span>}
+        {job.duplicate === true && (
+          <span className="ml-2 text-xs font-normal text-gray-500">Already saved (skipped)</span>
+        )}
+        {job.saved === false && !job.duplicate && (
+          <span className="ml-2 text-xs font-normal text-red-600">Save failed</span>
+        )}
       </p>
       <JobField label="Location" value={job.location} />
       <JobField label="Experience" value={job.experience} />
@@ -155,6 +160,11 @@ function FetchTest() {
           <p className="text-sm text-gray-700">Messages found: {result.messages_found}</p>
           <p className="text-sm text-gray-700">Jobs detected: {result.jobs_detected}</p>
           <p className="text-sm text-gray-700">Jobs saved: {result.jobs_saved}</p>
+          {result.jobs_duplicate > 0 && (
+            <p className="text-sm text-gray-500">
+              Already saved previously (skipped): {result.jobs_duplicate}
+            </p>
+          )}
 
           <ul className="mt-3 space-y-1 text-sm">
             {result.channel_results.map((cr) => (

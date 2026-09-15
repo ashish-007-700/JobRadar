@@ -69,6 +69,35 @@ def save_job(job: dict) -> dict:
     return result.data[0]
 
 
+def _parse_date_window(date: str) -> tuple[str, str]:
+    try:
+        requested_date = date_cls.fromisoformat(date)
+    except ValueError as exc:
+        raise JobStorageError(f"Invalid date '{date}'. Use YYYY-MM-DD.", status_code=400) from exc
+    next_day = requested_date + timedelta(days=1)
+    return f"{requested_date.isoformat()}T00:00:00+00:00", f"{next_day.isoformat()}T00:00:00+00:00"
+
+
+def job_exists(telegram_channel: str, telegram_message_id: int) -> bool:
+    """Basic dedup check: has this exact Telegram message already been saved?
+
+    Deliberately not a DB unique constraint or upsert (per spec's guidance on
+    how NOT to implement dedup) - just a check before insert in the caller."""
+    client = _get_client()
+    try:
+        result = (
+            client.table("jobs")
+            .select("id")
+            .eq("telegram_channel", telegram_channel)
+            .eq("telegram_message_id", telegram_message_id)
+            .limit(1)
+            .execute()
+        )
+    except APIError as exc:
+        raise JobStorageError(str(exc), status_code=500) from exc
+    return bool(result.data)
+
+
 def list_jobs(
     date: str | None = None,
     company: str | None = None,
@@ -80,13 +109,8 @@ def list_jobs(
     query = client.table("jobs").select("*")
 
     if date:
-        try:
-            requested_date = date_cls.fromisoformat(date)
-        except ValueError as exc:
-            raise JobStorageError(f"Invalid date '{date}'. Use YYYY-MM-DD.", status_code=400) from exc
-        next_day = requested_date + timedelta(days=1)
-        query = query.gte("posted_at", f"{requested_date.isoformat()}T00:00:00+00:00")
-        query = query.lt("posted_at", f"{next_day.isoformat()}T00:00:00+00:00")
+        start, end = _parse_date_window(date)
+        query = query.gte("posted_at", start).lt("posted_at", end)
 
     if company:
         query = query.ilike("company", f"%{company}%")
@@ -100,6 +124,19 @@ def list_jobs(
     except APIError as exc:
         raise JobStorageError(str(exc), status_code=500) from exc
     return result.data
+
+
+def delete_jobs_for_date(date: str) -> int:
+    """Delete every job whose posted_at falls on the given date. Returns the
+    number of rows deleted. `date` is required (not optional) so this can
+    never be called accidentally without a date and wipe the whole table."""
+    start, end = _parse_date_window(date)
+    client = _get_client()
+    try:
+        result = client.table("jobs").delete().gte("posted_at", start).lt("posted_at", end).execute()
+    except APIError as exc:
+        raise JobStorageError(str(exc), status_code=500) from exc
+    return len(result.data)
 
 
 def get_job(job_id: str) -> dict | None:
