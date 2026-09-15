@@ -40,3 +40,11 @@ export async function deleteChannel(id) {
 export async function validateChannel(id) {
   return request(`/api/channels/${id}/validate`, { method: 'POST' })
 }
+
+export async function fetchTelegramMessages(date) {
+  return request('/api/telegram/fetch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(date ? { date } : {}),
+  })
+}

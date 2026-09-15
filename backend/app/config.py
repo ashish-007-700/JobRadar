@@ -23,3 +23,7 @@ TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME", "jobradar")
 # vs `uvicorn app.main:app`).
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 TELEGRAM_SESSION_PATH = str(BACKEND_DIR / TELEGRAM_SESSION_NAME)
+
+# Timezone used to interpret "requested date" for message fetching, so a day
+# boundary matches the user's local day rather than UTC's.
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "UTC")

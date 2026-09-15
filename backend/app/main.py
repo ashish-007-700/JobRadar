@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes.channels import router as channels_router
 from app.api.routes.health import router as health_router
+from app.api.routes.telegram import router as telegram_router
 from app.config import FRONTEND_URL
 from app.services import telegram_client
 
@@ -34,6 +35,7 @@ app.add_middleware(
 
 app.include_router(health_router, prefix="/api")
 app.include_router(channels_router, prefix="/api")
+app.include_router(telegram_router, prefix="/api")
 
 
 @app.exception_handler(RuntimeError)

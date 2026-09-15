@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import Channels from './pages/Channels'
 import Dashboard from './pages/Dashboard'
+import FetchTest from './pages/FetchTest'
 
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'channels', label: 'Channels' },
+  { id: 'dashboard', label: 'Dashboard', Component: Dashboard },
+  { id: 'channels', label: 'Channels', Component: Channels },
+  { id: 'fetch-test', label: 'Fetch Test', Component: FetchTest },
 ]
 
 function App() {
   const [tab, setTab] = useState('dashboard')
+  const ActiveComponent = TABS.find((t) => t.id === tab).Component
 
   return (
     <div>
@@ -26,7 +29,7 @@ function App() {
           ))}
         </div>
       </nav>
-      {tab === 'dashboard' ? <Dashboard /> : <Channels />}
+      <ActiveComponent />
     </div>
   )
 }

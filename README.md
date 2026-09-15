@@ -19,9 +19,13 @@ See [`docs/spec.md`](docs/spec.md) for the full project specification.
 - **Section 4 — Channel management:** Full channel CRUD (`/api/channels`) backed by
   Supabase, with each channel validated/resolved against Telegram (via Telethon) before it's
   stored, plus a revalidation endpoint and a Channels tab in the dashboard.
+- **Section 5 — Message fetching:** `POST /api/telegram/fetch` retrieves raw Telegram
+  messages for a requested date from enabled channels only, records the run in
+  `fetch_runs`, and a Fetch Test tab lets you try it from the UI. Messages are **not** yet
+  treated as jobs.
 
-Telegram message fetching, job extraction, URL resolution, and job storage are **not**
-implemented yet — they belong to later sections.
+Job extraction, URL resolution, and job storage are **not** implemented yet — they belong to
+later sections.
 
 ## Required software
 
@@ -129,6 +133,52 @@ dashboard (or the API directly) to configure which channels JobRadar reads from:
 Only `enabled` channels will be used by the future message-fetching pipeline. All Telegram
 interaction happens in the backend — the frontend never sees API credentials or session data.
 
+## Message fetching (testing only)
+
+`POST /api/telegram/fetch` retrieves messages for a given date from all **enabled** channels.
+This section is retrieval only — no job detection or storage happens yet.
+
+```bash
+curl -X POST http://localhost:8000/api/telegram/fetch \
+  -H "Content-Type: application/json" \
+  -d '{"date": "2026-09-15"}'
+```
+
+Omit `date` (or send `{}`/no body) to use today's date, interpreted in the `APP_TIMEZONE`
+configured in `backend/.env` (default `UTC`) — set it to your own IANA timezone (e.g.
+`Asia/Kolkata`) so "today" matches your local day, not UTC's.
+
+Response shape:
+
+```json
+{
+  "date": "2026-09-15",
+  "channels_processed": 3,
+  "messages_found": 47,
+  "channel_results": [
+    { "channel_username": "fresheroffcampus", "message_count": 21, "status": "ok" },
+    { "channel_username": "offcampus_jobs", "message_count": 0, "status": "error", "detail": "..." }
+  ],
+  "messages": [
+    {
+      "message_id": 123,
+      "channel_id": -1001234567890,
+      "channel_username": "fresheroffcampus",
+      "message_text": "...",
+      "message_date": "2026-09-15T09:00:00+00:00",
+      "message_url": "https://t.me/fresheroffcampus/123"
+    }
+  ]
+}
+```
+
+A failing channel is reported in `channel_results` with `status: "error"` and does not stop
+the rest of the fetch. Every call is also logged as a row in `fetch_runs` (status
+`completed`, `completed_with_errors`, or `failed`).
+
+Use the **Fetch Test** tab in the frontend to pick a date, run a fetch, see the per-channel
+counts, and expand individual raw messages for debugging.
+
 ## Frontend setup
 
 ```bash
@@ -161,6 +211,7 @@ TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
 TELEGRAM_PHONE=
 TELEGRAM_SESSION_NAME=jobradar
+APP_TIMEZONE=UTC
 ```
 
 `frontend/.env.example`:
