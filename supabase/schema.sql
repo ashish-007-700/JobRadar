@@ -17,6 +17,7 @@ create table if not exists channels (
   id uuid primary key default gen_random_uuid(),
   channel_username text not null unique,
   channel_name text not null,
+  telegram_channel_id bigint,
   enabled boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

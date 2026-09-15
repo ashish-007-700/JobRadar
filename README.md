@@ -16,9 +16,12 @@ See [`docs/spec.md`](docs/spec.md) for the full project specification.
   check at `/api/health/db`.
 - **Section 3 — Telegram authentication:** A Telethon-backed service that connects to a
   Telegram user account, persists the session, and reports status at `/api/health/telegram`.
+- **Section 4 — Channel management:** Full channel CRUD (`/api/channels`) backed by
+  Supabase, with each channel validated/resolved against Telegram (via Telethon) before it's
+  stored, plus a revalidation endpoint and a Channels tab in the dashboard.
 
-Telegram channel management/fetching, job extraction, URL resolution, and job storage are
-**not** implemented yet — they belong to later sections.
+Telegram message fetching, job extraction, URL resolution, and job storage are **not**
+implemented yet — they belong to later sections.
 
 ## Required software
 
@@ -59,6 +62,11 @@ Health check: `GET http://localhost:8000/api/health` → `{"status": "ok"}`
 5. Restart the backend and check `GET http://localhost:8000/api/health/db` →
    `{"status": "ok"}`. If it returns `{"status": "error", "detail": "..."}`, the message
    explains what's missing (env vars not set, schema not applied, etc.).
+
+If you already ran `supabase/schema.sql` before Section 4 was added, also run
+`supabase/migrations/0002_add_telegram_channel_id.sql` — it adds the `telegram_channel_id`
+column the channels API now relies on. A brand-new project only needs the current
+`supabase/schema.sql`.
 
 ## Telegram authentication setup
 
@@ -102,6 +110,24 @@ JobRadar connects to Telegram as your own user account (not a bot), using
 **Security precautions:** never commit `.env` or `*.session` files, never paste your API
 hash, login code, or 2FA password into a chat or issue, and treat the `.session` file like a
 password — delete and re-authenticate if you suspect it leaked.
+
+## Channel management
+
+Once Supabase and Telegram authentication are both set up, use the **Channels** tab in the
+dashboard (or the API directly) to configure which channels JobRadar reads from:
+
+- `GET /api/channels` — list configured channels.
+- `POST /api/channels` `{"channel": "@fresheroffcampus"}` — normalizes the input (accepts
+  `@username`, `username`, `https://t.me/username`, or `https://t.me/s/username`), resolves it
+  through Telethon, and only stores it in Supabase if the channel exists and is accessible to
+  your authenticated Telegram account.
+- `PUT /api/channels/{id}` `{"enabled": false}` — enable/disable a channel without deleting it.
+- `DELETE /api/channels/{id}` — remove a channel.
+- `POST /api/channels/{id}/validate` — re-checks a stored channel against Telegram and
+  refreshes its name/ID in Supabase if they changed.
+
+Only `enabled` channels will be used by the future message-fetching pipeline. All Telegram
+interaction happens in the backend — the frontend never sees API credentials or session data.
 
 ## Frontend setup
 

@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.api.routes.channels import router as channels_router
 from app.api.routes.health import router as health_router
 from app.config import FRONTEND_URL
 from app.services import telegram_client
@@ -31,3 +33,11 @@ app.add_middleware(
 )
 
 app.include_router(health_router, prefix="/api")
+app.include_router(channels_router, prefix="/api")
+
+
+@app.exception_handler(RuntimeError)
+async def runtime_error_handler(request: Request, exc: RuntimeError):
+    # Raised when a dependency (Supabase, Telegram) isn't configured yet;
+    # surface it as a clean 503 instead of an unhandled 500 with a traceback.
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
