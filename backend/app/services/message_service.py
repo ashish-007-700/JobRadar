@@ -1,3 +1,4 @@
+import logging
 from datetime import date as date_cls
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -5,8 +6,10 @@ from zoneinfo import ZoneInfo
 from telethon.errors import RPCError
 
 from app.config import APP_TIMEZONE
-from app.services import channel_service, telegram_client
+from app.services import channel_service, job_detection, telegram_client
 from app.services.supabase_client import get_supabase_client
+
+logger = logging.getLogger(__name__)
 
 
 class FetchValidationError(Exception):
@@ -127,6 +130,17 @@ async def fetch_messages_for_date(date_str: str | None) -> dict:
             )
             all_messages.extend(channel_messages)
 
+    detected_jobs = [
+        job for job in (job_detection.process_message(m) for m in all_messages) if job is not None
+    ]
+    logger.info(
+        "Fetch %s: %d messages, %d detected as jobs, %d rejected",
+        requested_date,
+        len(all_messages),
+        len(detected_jobs),
+        len(all_messages) - len(detected_jobs),
+    )
+
     status = "completed_with_errors" if run_errors else "completed"
     _finish_fetch_run(
         run["id"],
@@ -134,6 +148,7 @@ async def fetch_messages_for_date(date_str: str | None) -> dict:
         completed_at=datetime.now(timezone.utc).isoformat(),
         channels_processed=len(enabled_channels),
         messages_processed=len(all_messages),
+        jobs_detected=len(detected_jobs),
         errors=run_errors,
     )
 
@@ -141,6 +156,8 @@ async def fetch_messages_for_date(date_str: str | None) -> dict:
         "date": requested_date.isoformat(),
         "channels_processed": len(enabled_channels),
         "messages_found": len(all_messages),
+        "jobs_detected": len(detected_jobs),
         "channel_results": channel_results,
         "messages": all_messages,
+        "jobs": detected_jobs,
     }

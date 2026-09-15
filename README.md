@@ -21,11 +21,14 @@ See [`docs/spec.md`](docs/spec.md) for the full project specification.
   stored, plus a revalidation endpoint and a Channels tab in the dashboard.
 - **Section 5 — Message fetching:** `POST /api/telegram/fetch` retrieves raw Telegram
   messages for a requested date from enabled channels only, records the run in
-  `fetch_runs`, and a Fetch Test tab lets you try it from the UI. Messages are **not** yet
-  treated as jobs.
+  `fetch_runs`, and a Fetch Test tab lets you try it from the UI.
+- **Section 6 — Job detection & extraction:** Deterministic, rule-based detection of which
+  fetched messages are genuine job posts, plus extraction of structured fields (company,
+  title, location, experience, qualification, batch, salary, skills, employment type,
+  original apply URL). Detected jobs are returned by the fetch endpoint but **not** saved to
+  Supabase yet.
 
-Job extraction, URL resolution, and job storage are **not** implemented yet — they belong to
-later sections.
+URL resolution and job storage are **not** implemented yet — they belong to later sections.
 
 ## Required software
 
@@ -133,10 +136,12 @@ dashboard (or the API directly) to configure which channels JobRadar reads from:
 Only `enabled` channels will be used by the future message-fetching pipeline. All Telegram
 interaction happens in the backend — the frontend never sees API credentials or session data.
 
-## Message fetching (testing only)
+## Message fetching & job detection (testing only)
 
-`POST /api/telegram/fetch` retrieves messages for a given date from all **enabled** channels.
-This section is retrieval only — no job detection or storage happens yet.
+`POST /api/telegram/fetch` retrieves messages for a given date from all **enabled** channels,
+then runs each message through deterministic, rule-based job detection (see
+`backend/app/services/job_detection.py`). Nothing is saved to Supabase yet — this endpoint is
+for verifying the pipeline.
 
 ```bash
 curl -X POST http://localhost:8000/api/telegram/fetch \
@@ -155,6 +160,7 @@ Response shape:
   "date": "2026-09-15",
   "channels_processed": 3,
   "messages_found": 47,
+  "jobs_detected": 12,
   "channel_results": [
     { "channel_username": "fresheroffcampus", "message_count": 21, "status": "ok" },
     { "channel_username": "offcampus_jobs", "message_count": 0, "status": "error", "detail": "..." }
@@ -168,16 +174,45 @@ Response shape:
       "message_date": "2026-09-15T09:00:00+00:00",
       "message_url": "https://t.me/fresheroffcampus/123"
     }
+  ],
+  "jobs": [
+    {
+      "company": "Clarivate",
+      "title": "Associate STEM Content Analyst (Engineering)",
+      "location": "Chennai (Hybrid)",
+      "experience": "Freshers / 0-1 Year",
+      "qualification": "B.Sc/M.Sc - Mathematics, Physics, Computer Science, BCA/MCA",
+      "batch": "2025 / 2026",
+      "salary": "Up to ₹6 LPA",
+      "skills": null,
+      "employment_type": null,
+      "original_apply_url": "https://www.fresheroffcampus.com/clarivate-off-campus/",
+      "telegram_message_id": 123,
+      "telegram_channel": "fresheroffcampus",
+      "telegram_message_url": "https://t.me/fresheroffcampus/123",
+      "posted_at": "2026-09-15T09:00:00+00:00"
+    }
   ]
 }
 ```
 
 A failing channel is reported in `channel_results` with `status: "error"` and does not stop
 the rest of the fetch. Every call is also logged as a row in `fetch_runs` (status
-`completed`, `completed_with_errors`, or `failed`).
+`completed`, `completed_with_errors`, or `failed`, with `jobs_detected` now populated and
+`jobs_saved` left at 0 until Section 8).
 
-Use the **Fetch Test** tab in the frontend to pick a date, run a fetch, see the per-channel
-counts, and expand individual raw messages for debugging.
+Job detection is deterministic/rule-based (keyword + structured-field scoring), not an LLM —
+see `backend/app/services/job_detection.py` if you want to tune the keyword lists or
+threshold. Run its test suite from `backend/` (venv active, `pip install -r
+requirements-dev.txt` once):
+
+```bash
+pytest tests/test_job_detection.py -v
+```
+
+Use the **Fetch Test** tab in the frontend to pick a date, run a fetch, see per-channel
+counts, browse detected jobs as cards, and expand each job's (or any raw message's) full JSON
+for debugging.
 
 ## Frontend setup
 

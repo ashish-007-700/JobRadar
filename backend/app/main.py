@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -9,6 +10,8 @@ from app.api.routes.health import router as health_router
 from app.api.routes.telegram import router as telegram_router
 from app.config import FRONTEND_URL
 from app.services import telegram_client
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
 @asynccontextmanager
