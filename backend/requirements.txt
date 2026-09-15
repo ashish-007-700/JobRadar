@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+telethon==1.38.1
+httpx==0.28.1
+beautifulsoup4==4.12.3
+playwright==1.49.1
+supabase==2.11.0
