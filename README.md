@@ -134,11 +134,25 @@ enforces this; see §16).
    - If you created your project before this README's current state and already ran an older
      copy of `schema.sql`, also run `supabase/migrations/0002_add_telegram_channel_id.sql`.
      A brand-new project only needs the current `schema.sql`.
-3. In **Project Settings → API**, copy the Project URL and an API key.
+3. In **Project Settings → API**, copy the **Project URL** exactly (it's
+   `https://<20-char-id>.supabase.co` — a partial copy/paste here is a common mistake and
+   causes a DNS failure that can surface as a confusing "Invalid API key" error instead).
+   Copy the **secret key** for `SUPABASE_KEY` (Supabase's current name for what used to be
+   called `service_role` — used only server-side, and it bypasses Row Level Security policies
+   you haven't configured).
 4. Put them in `backend/.env` as `SUPABASE_URL` / `SUPABASE_KEY`.
 5. After starting the backend (§9), check `GET http://localhost:8000/api/health/db` →
    `{"status": "ok"}`. An `{"status": "error", "detail": "..."}` response explains what's
    still missing.
+
+**If you get `{"status": "error", "detail": "Invalid API key"}` even with a correct key:**
+newer Supabase projects issue keys in a new format (`sb_secret_...`/`sb_publishable_...`,
+no dots) instead of the old JWT format (`eyJ...header.payload.signature`). The `supabase`
+Python package needs to be **2.31.0 or newer** to accept the new format — older versions
+validate the key against a JWT-shaped regex client-side and reject anything else before ever
+making a network call, regardless of whether the key is actually valid. This repo pins
+`supabase==2.31.0` in `requirements.txt` for exactly this reason; if you're on an older
+install, `pip install --upgrade supabase` and re-run `pip install -r requirements.txt`.
 
 ## 7. Telegram API setup
 
