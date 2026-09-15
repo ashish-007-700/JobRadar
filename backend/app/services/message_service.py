@@ -7,7 +7,8 @@ import httpx
 from telethon.errors import RPCError
 
 from app.config import APP_TIMEZONE
-from app.services import channel_service, job_detection, telegram_client, url_resolver
+from app.services import channel_service, job_detection, job_service, telegram_client, url_resolver
+from app.services.job_service import JobStorageError
 from app.services.supabase_client import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,31 @@ async def _resolve_job_urls(jobs: list[dict]) -> None:
             job["resolution_status"] = result["resolution_status"]
 
 
-async def fetch_messages_for_date(date_str: str | None, resolve_urls: bool = False) -> dict:
+def _save_jobs(jobs: list[dict]) -> tuple[int, list[dict]]:
+    saved_count = 0
+    save_errors = []
+    for job in jobs:
+        try:
+            saved_row = job_service.save_job(job)
+        except JobStorageError as exc:
+            job["saved"] = False
+            save_errors.append(
+                {
+                    "telegram_channel": job.get("telegram_channel"),
+                    "telegram_message_id": job.get("telegram_message_id"),
+                    "detail": exc.message,
+                }
+            )
+        else:
+            job["id"] = saved_row["id"]
+            job["saved"] = True
+            saved_count += 1
+    return saved_count, save_errors
+
+
+async def fetch_messages_for_date(
+    date_str: str | None, resolve_urls: bool = False, save_jobs: bool = False
+) -> dict:
     requested_date, start_utc, end_utc = _resolve_date_window(date_str)
 
     channels = await channel_service.list_channels()
@@ -157,6 +182,12 @@ async def fetch_messages_for_date(date_str: str | None, resolve_urls: bool = Fal
         await _resolve_job_urls(detected_jobs)
         logger.info("Resolved apply URLs for %d detected jobs", len(detected_jobs))
 
+    jobs_saved = 0
+    if save_jobs and detected_jobs:
+        jobs_saved, save_errors = _save_jobs(detected_jobs)
+        run_errors.extend(save_errors)
+        logger.info("Saved %d/%d detected jobs", jobs_saved, len(detected_jobs))
+
     status = "completed_with_errors" if run_errors else "completed"
     _finish_fetch_run(
         run["id"],
@@ -165,6 +196,7 @@ async def fetch_messages_for_date(date_str: str | None, resolve_urls: bool = Fal
         channels_processed=len(enabled_channels),
         messages_processed=len(all_messages),
         jobs_detected=len(detected_jobs),
+        jobs_saved=jobs_saved,
         errors=run_errors,
     )
 
@@ -173,6 +205,7 @@ async def fetch_messages_for_date(date_str: str | None, resolve_urls: bool = Fal
         "channels_processed": len(enabled_channels),
         "messages_found": len(all_messages),
         "jobs_detected": len(detected_jobs),
+        "jobs_saved": jobs_saved,
         "channel_results": channel_results,
         "messages": all_messages,
         "jobs": detected_jobs,

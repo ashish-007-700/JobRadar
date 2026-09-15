@@ -32,8 +32,12 @@ See [`docs/spec.md`](docs/spec.md) for the full project specification.
   JS-heavy pages) to a likely `final_apply_url`, with depth/loop limits and basic SSRF
   protection. Exposed standalone at `POST /api/resolve-url`, and optionally wired into
   `POST /api/telegram/fetch` via `resolve_urls: true`.
+- **Section 8 — Job storage:** Detected jobs can be persisted to the existing Supabase `jobs`
+  table (opt-in via `save_jobs: true` on the fetch endpoint), with `GET /api/jobs`
+  (filterable by date/company/location) and `GET /api/jobs/{id}` to read them back, plus a
+  Jobs tab in the frontend.
 
-Job storage is **not** implemented yet — that's Section 8.
+Deduplication, scheduling, and the polished final dashboard are **not** implemented yet.
 
 ## Required software
 
@@ -283,6 +287,56 @@ playwright install chromium
   once you see it running against real intermediate sites.
 - `original_apply_url` resolution is sequential per fetch call (one job after another), which
   is fine at personal-project volume but would need batching/concurrency at larger scale.
+
+## Job storage
+
+The `jobs` table already had every column the job pipeline produces (created back in Section
+2/4) — no schema changes were needed for this section.
+
+`POST /api/telegram/fetch` accepts a `save_jobs: true` flag; when set, every successfully
+detected job (after optional URL resolution) is inserted into Supabase individually. A job
+that fails to save (bad data, Supabase hiccup) is recorded in that job's `saved: false` and in
+the fetch's `errors`, but does **not** stop the rest of the batch — verified with a test where
+one job out of three fails to insert while the other two still succeed. `fetch_runs.jobs_saved`
+reflects how many actually persisted.
+
+```bash
+curl -X POST http://localhost:8000/api/telegram/fetch \
+  -H "Content-Type: application/json" \
+  -d '{"date": "2026-09-15", "resolve_urls": true, "save_jobs": true}'
+```
+
+Read them back:
+
+```bash
+curl "http://localhost:8000/api/jobs?date=2026-09-15&company=Clarivate&location=Chennai"
+curl http://localhost:8000/api/jobs/<job-id>
+```
+
+`GET /api/jobs` filters by `date` (matched against `posted_at`'s day), `company` and
+`location` (case-insensitive partial match), and supports `limit`/`offset` pagination.
+`GET /api/jobs/{id}` returns 404 if the job doesn't exist.
+
+`original_apply_url` and `final_apply_url` are always stored as separate columns — saving
+never overwrites one with the other, and `null` is stored (not a guessed value) for anything
+extraction couldn't determine. No deduplication is performed: fetching and saving the same
+message twice inserts two rows (the `content_hash` column exists in the schema but is
+intentionally unused until a future section).
+
+Run the storage tests (mocked Supabase client, no credentials needed):
+
+```bash
+pytest tests/test_job_service.py tests/test_message_service_storage.py tests/test_jobs_api.py -v
+```
+
+Use the **Jobs** tab in the frontend to browse persisted jobs with date/company/location
+filters. The **Fetch Test** tab has a "Save detected jobs to the database" checkbox so you can
+persist jobs from a real fetch run.
+
+**Known limitations:** filtering by `date` matches `posted_at` (the Telegram message's
+timestamp), not `discovered_at` (when JobRadar fetched it) — for the vast majority of cases
+these are the same day, but a message fetched shortly after midnight could technically have a
+`posted_at` from the previous day.
 
 ## Frontend setup
 

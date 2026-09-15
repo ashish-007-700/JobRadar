@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { fetchTelegramMessages } from '../services/api'
 
-function ResolveUrlsToggle({ checked, onChange }) {
+function Toggle({ checked, onChange, children }) {
   return (
     <label className="flex items-center gap-2 text-sm text-gray-700">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      Resolve apply URLs (slower — fetches the application chain for each job)
+      {children}
     </label>
   )
 }
@@ -37,6 +37,8 @@ function JobCard({ job, rawMessage }) {
     <li className="p-4">
       <p className="font-medium text-gray-900">
         {job.title || 'Untitled role'} {job.company ? `— ${job.company}` : ''}
+        {job.saved === true && <span className="ml-2 text-xs font-normal text-green-700">Saved</span>}
+        {job.saved === false && <span className="ml-2 text-xs font-normal text-red-600">Save failed</span>}
       </p>
       <JobField label="Location" value={job.location} />
       <JobField label="Experience" value={job.experience} />
@@ -92,6 +94,7 @@ function JobCard({ job, rawMessage }) {
 function FetchTest() {
   const [date, setDate] = useState(todayIsoDate())
   const [resolveUrls, setResolveUrls] = useState(false)
+  const [saveJobs, setSaveJobs] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
@@ -102,7 +105,7 @@ function FetchTest() {
     setError(null)
     setResult(null)
     try {
-      setResult(await fetchTelegramMessages(date, resolveUrls))
+      setResult(await fetchTelegramMessages(date, resolveUrls, saveJobs))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -114,8 +117,8 @@ function FetchTest() {
     <div className="mx-auto max-w-3xl px-4 py-8">
       <h1 className="text-xl font-semibold text-gray-900">Fetch Test</h1>
       <p className="mt-1 text-sm text-gray-500">
-        Retrieve Telegram messages for a date and run rule-based job detection on them. This
-        does not save anything yet — it's for verifying the fetch and detection pipeline.
+        Retrieve Telegram messages for a date and run rule-based job detection on them.
+        Nothing is saved unless you check "Save detected jobs to the database" below.
       </p>
 
       <div className="mt-4 flex gap-2">
@@ -135,8 +138,13 @@ function FetchTest() {
         </button>
       </div>
 
-      <div className="mt-2">
-        <ResolveUrlsToggle checked={resolveUrls} onChange={setResolveUrls} />
+      <div className="mt-2 space-y-1">
+        <Toggle checked={resolveUrls} onChange={setResolveUrls}>
+          Resolve apply URLs (slower — fetches the application chain for each job)
+        </Toggle>
+        <Toggle checked={saveJobs} onChange={setSaveJobs}>
+          Save detected jobs to the database
+        </Toggle>
       </div>
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
@@ -149,6 +157,7 @@ function FetchTest() {
           </p>
           <p className="text-sm text-gray-700">Messages found: {result.messages_found}</p>
           <p className="text-sm text-gray-700">Jobs detected: {result.jobs_detected}</p>
+          <p className="text-sm text-gray-700">Jobs saved: {result.jobs_saved}</p>
 
           <ul className="mt-3 space-y-1 text-sm">
             {result.channel_results.map((cr) => (

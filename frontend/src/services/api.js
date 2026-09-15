@@ -41,11 +41,15 @@ export async function validateChannel(id) {
   return request(`/api/channels/${id}/validate`, { method: 'POST' })
 }
 
-export async function fetchTelegramMessages(date, resolveUrls = false) {
+export async function fetchTelegramMessages(date, resolveUrls = false, saveJobs = false) {
   return request('/api/telegram/fetch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...(date ? { date } : {}), resolve_urls: resolveUrls }),
+    body: JSON.stringify({
+      ...(date ? { date } : {}),
+      resolve_urls: resolveUrls,
+      save_jobs: saveJobs,
+    }),
   })
 }
 
@@ -55,4 +59,17 @@ export async function resolveUrl(url) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
   })
+}
+
+export async function listJobs(filters = {}) {
+  const params = new URLSearchParams()
+  if (filters.date) params.set('date', filters.date)
+  if (filters.company) params.set('company', filters.company)
+  if (filters.location) params.set('location', filters.location)
+  const query = params.toString()
+  return request(`/api/jobs${query ? `?${query}` : ''}`)
+}
+
+export async function getJob(id) {
+  return request(`/api/jobs/${id}`)
 }
