@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { fetchTelegramMessages } from '../services/api'
+import { todayIsoDate } from '../utils/date'
 
 function Toggle({ checked, onChange, children }) {
   return (
@@ -8,10 +9,6 @@ function Toggle({ checked, onChange, children }) {
       {children}
     </label>
   )
-}
-
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10)
 }
 
 function findRawMessage(messages, job) {
@@ -162,7 +159,10 @@ function FetchTest() {
           <ul className="mt-3 space-y-1 text-sm">
             {result.channel_results.map((cr) => (
               <li key={cr.channel_username} className={cr.status === 'error' ? 'text-red-600' : 'text-gray-700'}>
-                @{cr.channel_username} — {cr.status === 'error' ? cr.detail : cr.message_count}
+                @{cr.channel_username} —{' '}
+                {cr.status === 'error'
+                  ? cr.error
+                  : `${cr.messages_processed} messages, ${cr.jobs_detected} jobs detected, ${cr.jobs_saved} saved`}
               </li>
             ))}
           </ul>

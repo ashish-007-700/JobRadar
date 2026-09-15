@@ -42,6 +42,14 @@ See [`docs/spec.md`](docs/spec.md) for the full project specification.
   Apply button (`final_apply_url`, falling back to `original_apply_url`) plus an expandable
   details view. The old standalone "Jobs" tab was folded into the Dashboard; a "Debug: Fetch
   Test" tab remains for inspecting raw messages/per-channel results while tuning detection.
+- **Section 10 — Fetch controls & status:** A process-local guard rejects a second fetch
+  while one is running (`409`), `GET /api/telegram/fetch/status` reports
+  idle/running/completed/partial/failed (backed by the latest `fetch_runs` row),
+  `GET /api/fetch-runs` lists recent runs, per-channel stats now include jobs
+  detected/saved, and error messages are friendlier (e.g. "Unable to access channel
+  @example." instead of a raw exception). The dashboard shows live fetch state with a Retry
+  action, and a new Fetch History tab lists recent runs with per-run error detail. Fixed a
+  real UTC/local-date bug in the frontend's default date picker along the way.
 
 Deduplication and scheduling are **not** implemented yet.
 
@@ -173,12 +181,28 @@ Response shape:
 ```json
 {
   "date": "2026-09-15",
+  "status": "completed",
   "channels_processed": 3,
   "messages_found": 47,
   "jobs_detected": 12,
+  "jobs_saved": 0,
+  "errors": [],
   "channel_results": [
-    { "channel_username": "fresheroffcampus", "message_count": 21, "status": "ok" },
-    { "channel_username": "offcampus_jobs", "message_count": 0, "status": "error", "detail": "..." }
+    {
+      "channel_username": "fresheroffcampus",
+      "messages_processed": 21,
+      "status": "ok",
+      "jobs_detected": 5,
+      "jobs_saved": 0
+    },
+    {
+      "channel_username": "offcampus_jobs",
+      "messages_processed": 0,
+      "status": "error",
+      "error": "Unable to access channel @offcampus_jobs.",
+      "jobs_detected": 0,
+      "jobs_saved": 0
+    }
   ],
   "messages": [
     {
@@ -214,8 +238,7 @@ Response shape:
 
 A failing channel is reported in `channel_results` with `status: "error"` and does not stop
 the rest of the fetch. Every call is also logged as a row in `fetch_runs` (status
-`completed`, `completed_with_errors`, or `failed`, with `jobs_detected` now populated and
-`jobs_saved` left at 0 until Section 8).
+`completed`, `completed_with_errors`, or `failed`).
 
 Job detection is deterministic/rule-based (keyword + structured-field scoring), not an LLM —
 see `backend/app/services/job_detection.py` if you want to tune the keyword lists or
@@ -344,6 +367,73 @@ timestamp), not `discovered_at` (when JobRadar fetched it) — for the vast majo
 these are the same day, but a message fetched shortly after midnight could technically have a
 `posted_at` from the previous day.
 
+## Fetch controls & status
+
+Only one fetch can run at a time (a simple in-process flag — this is a single-instance
+personal app, so no distributed locking is needed). Starting a second one while the first is
+still running returns:
+
+```bash
+curl -i -X POST http://localhost:8000/api/telegram/fetch -d '{}' -H "Content-Type: application/json"
+# HTTP/1.1 409 Conflict
+# {"detail": "A fetch is already running. Please wait for it to finish."}
+```
+
+Check the current state — useful after a page reload, since the frontend can't otherwise
+tell whether a fetch it started is still running:
+
+```bash
+curl http://localhost:8000/api/telegram/fetch/status
+```
+
+```json
+{
+  "state": "completed",
+  "last_run": {
+    "id": "...",
+    "requested_date": "2026-09-15",
+    "status": "completed",
+    "channels_processed": 3,
+    "messages_processed": 47,
+    "jobs_detected": 12,
+    "jobs_saved": 12,
+    "started_at": "2026-09-15T09:00:00+00:00",
+    "completed_at": "2026-09-15T09:00:42+00:00",
+    "errors": []
+  }
+}
+```
+
+`state` is one of `idle` (no fetch has run yet), `running`, `completed`, `partial`
+(`completed_with_errors` — some channels/jobs failed but the run finished), or `failed`
+(couldn't even get started, e.g. Telegram unauthenticated). List recent runs:
+
+```bash
+curl "http://localhost:8000/api/fetch-runs?limit=10"
+```
+
+Error messages throughout the pipeline are converted to plain language before reaching the
+API/frontend (e.g. `"Unable to access channel @example."`,
+`"Telegram authentication is unavailable. Run the login script first."`,
+`"Timed out while resolving an application URL."`) — raw exceptions stay in the backend logs
+only.
+
+Run the new tests:
+
+```bash
+pytest tests/test_fetch_controls.py -v
+```
+
+In the frontend, the Dashboard's fetch panel shows the live state (including a **Retry**
+button after a failure/partial run) and polls `/api/telegram/fetch/status` if it detects a
+fetch already running on load. The **Fetch History** tab lists recent runs in a table, with
+per-run error detail available on click.
+
+**Known limitation:** the "only one fetch at a time" guard is per-process. If you ever run
+multiple backend worker processes (e.g. `uvicorn --workers 2`), each would enforce it
+independently rather than against each other — fine for the single-worker personal setup this
+app assumes, but worth knowing before changing that.
+
 ## Frontend setup
 
 ```bash
@@ -372,9 +462,20 @@ run the login script rather than trying to authenticate from the browser. Compan
 filters query the API directly; experience/employment-type filters narrow the already-loaded
 list client-side (the jobs API doesn't support server-side filtering on those fields).
 
+Below the header, a status panel shows the current/last fetch state (idle, fetching,
+completed, partial, or failed), the message/job counts, any errors, and a **Retry** button
+after a failed or partial run. The date picker defaults to today in your browser's local
+time zone (fixed a real UTC-conversion bug here — `Date#toISOString()` shifts near midnight
+depending on the visitor's offset).
+
 ### Channels tab
 
 Unchanged from Section 4 — add/enable/disable/revalidate/delete Telegram channels.
+
+### Fetch History tab
+
+A table of the most recent fetch runs (date, status, messages, jobs detected/saved,
+started/completed times), with a click-to-expand error list per run.
 
 ### Debug: Fetch Test tab
 

@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes.channels import router as channels_router
+from app.api.routes.fetch_runs import router as fetch_runs_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.resolver import router as resolver_router
@@ -43,6 +44,7 @@ app.include_router(channels_router, prefix="/api")
 app.include_router(telegram_router, prefix="/api")
 app.include_router(resolver_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
+app.include_router(fetch_runs_router, prefix="/api")
 
 
 @app.exception_handler(RuntimeError)

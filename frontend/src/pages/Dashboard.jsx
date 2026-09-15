@@ -1,18 +1,41 @@
 import { useEffect, useState } from 'react'
+import FetchStatusPanel from '../components/FetchStatusPanel'
 import Header from '../components/Header'
 import JobCard from '../components/JobCard'
 import JobFilters from '../components/JobFilters'
 import SummaryStats from '../components/SummaryStats'
-import { checkTelegramHealth, fetchTelegramMessages, listChannels, listJobs } from '../services/api'
-
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10)
-}
+import {
+  checkTelegramHealth,
+  fetchTelegramMessages,
+  getFetchStatus,
+  listChannels,
+  listJobs,
+} from '../services/api'
+import { todayIsoDate } from '../utils/date'
 
 function matchesClientFilter(job, field, value) {
   if (!value) return true
   const jobValue = job[field]
   return typeof jobValue === 'string' && jobValue.toLowerCase().includes(value.toLowerCase())
+}
+
+function normalizeRun(result) {
+  return {
+    requested_date: result.date ?? result.requested_date,
+    status: result.status,
+    channels_processed: result.channels_processed,
+    messages_processed: result.messages_found ?? result.messages_processed,
+    jobs_detected: result.jobs_detected,
+    jobs_saved: result.jobs_saved,
+    errors: result.errors,
+  }
+}
+
+function toDisplayState(runStatus) {
+  if (runStatus === 'completed') return 'completed'
+  if (runStatus === 'completed_with_errors') return 'partial'
+  if (runStatus === 'failed') return 'failed'
+  return 'idle'
 }
 
 function Dashboard() {
@@ -33,9 +56,9 @@ function Dashboard() {
     employmentType: '',
   })
 
-  const [fetching, setFetching] = useState(false)
+  const [fetchState, setFetchState] = useState('idle')
   const [fetchError, setFetchError] = useState(null)
-  const [lastFetchResult, setLastFetchResult] = useState(null)
+  const [lastRun, setLastRun] = useState(null)
 
   useEffect(() => {
     checkTelegramHealth()
@@ -51,6 +74,13 @@ function Dashboard() {
     listChannels()
       .then((channels) => setChannelCount(channels.filter((c) => c.enabled).length))
       .catch(() => setChannelCount(0))
+
+    getFetchStatus()
+      .then((status) => {
+        setFetchState(status.state === 'running' ? 'running' : toDisplayState(status.last_run?.status))
+        if (status.last_run) setLastRun(status.last_run)
+      })
+      .catch(() => {})
   }, [])
 
   const loadJobs = async () => {
@@ -75,17 +105,40 @@ function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, filters.company, filters.location])
 
+  // If a fetch is already running (e.g. detected on page load), poll until it
+  // finishes rather than pretending to show real-time progress.
+  useEffect(() => {
+    if (fetchState !== 'running') return undefined
+
+    const interval = setInterval(async () => {
+      try {
+        const status = await getFetchStatus()
+        if (status.state !== 'running') {
+          clearInterval(interval)
+          setFetchState(toDisplayState(status.last_run?.status))
+          if (status.last_run) setLastRun(status.last_run)
+          loadJobs()
+        }
+      } catch {
+        // Backend temporarily unreachable; keep polling.
+      }
+    }, 3000)
+
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchState])
+
   const handleFetchMessages = async () => {
-    setFetching(true)
+    setFetchState('running')
     setFetchError(null)
     try {
       const result = await fetchTelegramMessages(date, true, true)
-      setLastFetchResult(result)
+      setLastRun(normalizeRun(result))
+      setFetchState(toDisplayState(result.status))
       await loadJobs()
     } catch (err) {
       setFetchError(err.message)
-    } finally {
-      setFetching(false)
+      setFetchState('failed')
     }
   }
 
@@ -101,28 +154,25 @@ function Dashboard() {
         date={date}
         onDateChange={setDate}
         onFetch={handleFetchMessages}
-        fetching={fetching}
+        fetching={fetchState === 'running'}
         telegramStatus={telegramStatus}
         telegramDetail={telegramDetail}
       />
 
-      {fetchError && (
-        <p className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700">{fetchError}</p>
-      )}
-      {lastFetchResult && !fetchError && (
-        <p className="mt-4 rounded-md bg-green-50 p-3 text-sm text-green-800">
-          Fetch complete — messages processed: {lastFetchResult.messages_found}, jobs detected:{' '}
-          {lastFetchResult.jobs_detected}, jobs saved: {lastFetchResult.jobs_saved}.
-        </p>
-      )}
+      <FetchStatusPanel
+        state={fetchState}
+        lastRun={lastRun}
+        fetchError={fetchError}
+        onRetry={handleFetchMessages}
+      />
 
       <div className="mt-6">
         <SummaryStats
           stats={{
             jobsFound: jobs.length,
             channels: channelCount,
-            messagesProcessed: lastFetchResult?.messages_found ?? 0,
-            jobsSaved: lastFetchResult?.jobs_saved ?? 0,
+            messagesProcessed: lastRun?.messages_processed ?? 0,
+            jobsSaved: lastRun?.jobs_saved ?? 0,
           }}
         />
       </div>

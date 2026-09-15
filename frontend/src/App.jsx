@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import Channels from './pages/Channels'
 import Dashboard from './pages/Dashboard'
+import FetchHistory from './pages/FetchHistory'
 import FetchTest from './pages/FetchTest'
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', Component: Dashboard },
   { id: 'channels', label: 'Channels', Component: Channels },
+  { id: 'history', label: 'Fetch History', Component: FetchHistory },
   { id: 'fetch-test', label: 'Debug: Fetch Test', Component: FetchTest },
 ]
 

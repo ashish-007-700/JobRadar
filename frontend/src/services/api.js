@@ -77,3 +77,11 @@ export async function listJobs(filters = {}) {
 export async function getJob(id) {
   return request(`/api/jobs/${id}`)
 }
+
+export async function getFetchStatus() {
+  return request('/api/telegram/fetch/status')
+}
+
+export async function listFetchRuns(limit = 20) {
+  return request(`/api/fetch-runs?limit=${limit}`)
+}
