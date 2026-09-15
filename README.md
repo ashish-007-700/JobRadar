@@ -14,8 +14,10 @@ See [`docs/spec.md`](docs/spec.md) for the full project specification.
 - **Section 2 — Supabase setup:** Postgres schema for `channels`, `jobs`, and `fetch_runs`
   (see `supabase/schema.sql`), and a backend Supabase client service with a DB connectivity
   check at `/api/health/db`.
+- **Section 3 — Telegram authentication:** A Telethon-backed service that connects to a
+  Telegram user account, persists the session, and reports status at `/api/health/telegram`.
 
-Telegram authentication/fetching, job extraction, URL resolution, and channel/job CRUD are
+Telegram channel management/fetching, job extraction, URL resolution, and job storage are
 **not** implemented yet — they belong to later sections.
 
 ## Required software
@@ -58,6 +60,49 @@ Health check: `GET http://localhost:8000/api/health` → `{"status": "ok"}`
    `{"status": "ok"}`. If it returns `{"status": "error", "detail": "..."}`, the message
    explains what's missing (env vars not set, schema not applied, etc.).
 
+## Telegram authentication setup
+
+JobRadar connects to Telegram as your own user account (not a bot), using
+[Telethon](https://docs.telethon.dev).
+
+1. Get API credentials from [my.telegram.org](https://my.telegram.org) → **API development
+   tools**. This gives you an `api_id` and `api_hash`.
+2. Add them to `backend/.env`:
+
+   ```text
+   TELEGRAM_API_ID=123456
+   TELEGRAM_API_HASH=your-api-hash
+   TELEGRAM_PHONE=+1234567890
+   TELEGRAM_SESSION_NAME=jobradar
+   ```
+3. Run the one-time interactive login from the `backend/` directory (venv active):
+
+   ```bash
+   python -m app.telegram_login
+   ```
+
+   It prompts on the console for the login code Telegram sends you, and for your 2FA
+   password if you have one enabled. Nothing is sent to or exposed through the API/frontend.
+4. This creates a session file at `backend/<TELEGRAM_SESSION_NAME>.session` (e.g.
+   `backend/jobradar.session`). It is git-ignored and must never be committed — anyone with
+   this file can act as your Telegram account without needing the login code again.
+5. On every subsequent backend start, the existing session is reused automatically — you
+   won't be asked to log in again unless the session file is deleted or Telegram invalidates
+   it.
+6. Check `GET http://localhost:8000/api/health/telegram` to confirm:
+
+   ```json
+   { "connected": true, "authenticated": true, "user": "your_username" }
+   ```
+
+   If credentials are missing or Telegram is unreachable, this returns
+   `{"connected": false, "authenticated": false, "detail": "..."}` instead of crashing the
+   backend.
+
+**Security precautions:** never commit `.env` or `*.session` files, never paste your API
+hash, login code, or 2FA password into a chat or issue, and treat the `.session` file like a
+password — delete and re-authenticate if you suspect it leaked.
+
 ## Frontend setup
 
 ```bash
@@ -86,6 +131,10 @@ BACKEND_PORT=8000
 FRONTEND_URL=http://localhost:5173
 SUPABASE_URL=
 SUPABASE_KEY=
+TELEGRAM_API_ID=
+TELEGRAM_API_HASH=
+TELEGRAM_PHONE=
+TELEGRAM_SESSION_NAME=jobradar
 ```
 
 `frontend/.env.example`:
