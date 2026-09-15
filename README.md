@@ -6,17 +6,17 @@ results in a React dashboard.
 
 See [`docs/spec.md`](docs/spec.md) for the full project specification.
 
-## Section 1 scope
+## Progress
 
-This is the initial project setup only:
+- **Section 1 — Project setup:** React + Vite + Tailwind frontend shell, FastAPI backend with
+  a health-check endpoint, CORS restricted to the Vite dev origin, environment variable
+  structure for both apps.
+- **Section 2 — Supabase setup:** Postgres schema for `channels`, `jobs`, and `fetch_runs`
+  (see `supabase/schema.sql`), and a backend Supabase client service with a DB connectivity
+  check at `/api/health/db`.
 
-- React + Vite + Tailwind frontend shell
-- FastAPI backend with a health-check endpoint
-- Frontend-to-backend communication over HTTP, with CORS restricted to the Vite dev origin
-- Environment variable structure for both apps
-
-Telegram, Supabase, web scraping, and job-fetching logic are **not** implemented yet — they
-belong to later sections.
+Telegram authentication/fetching, job extraction, URL resolution, and channel/job CRUD are
+**not** implemented yet — they belong to later sections.
 
 ## Required software
 
@@ -41,6 +41,22 @@ uvicorn app.main:app --reload
 ```
 
 Health check: `GET http://localhost:8000/api/health` → `{"status": "ok"}`
+
+## Supabase setup
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. In the Supabase dashboard's SQL Editor, run `supabase/schema.sql` from this repo. It
+   creates the `channels`, `jobs`, and `fetch_runs` tables used by the rest of the app.
+3. In **Project Settings → API**, copy the Project URL and an API key.
+4. Add them to `backend/.env`:
+
+   ```text
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_KEY=your-api-key
+   ```
+5. Restart the backend and check `GET http://localhost:8000/api/health/db` →
+   `{"status": "ok"}`. If it returns `{"status": "error", "detail": "..."}`, the message
+   explains what's missing (env vars not set, schema not applied, etc.).
 
 ## Frontend setup
 
@@ -68,6 +84,8 @@ whether the backend is connected.
 BACKEND_HOST=127.0.0.1
 BACKEND_PORT=8000
 FRONTEND_URL=http://localhost:5173
+SUPABASE_URL=
+SUPABASE_KEY=
 ```
 
 `frontend/.env.example`:
