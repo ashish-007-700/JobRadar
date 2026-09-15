@@ -6,7 +6,6 @@ import JobFilters from '../components/JobFilters'
 import SummaryStats from '../components/SummaryStats'
 import {
   checkTelegramHealth,
-  deleteJobsForDate,
   fetchTelegramMessages,
   getFetchStatus,
   listChannels,
@@ -72,8 +71,10 @@ function Dashboard() {
   const [fetchError, setFetchError] = useState(null)
   const [lastRun, setLastRun] = useState(null)
 
-  const [resetting, setResetting] = useState(false)
-  const [resetError, setResetError] = useState(null)
+  // Non-destructive: just hides the list in this browser tab. Nothing is
+  // deleted from Supabase - it comes back on the next load/filter/date
+  // change, or by toggling this off again.
+  const [viewCleared, setViewCleared] = useState(false)
 
   useEffect(() => {
     checkTelegramHealth()
@@ -108,6 +109,7 @@ function Dashboard() {
         location: serverFilters.location || undefined,
       })
       setJobs(data)
+      setViewCleared(false)
     } catch (err) {
       setJobsError(err.message)
     } finally {
@@ -157,32 +159,13 @@ function Dashboard() {
     }
   }
 
-  const handleResetJobs = async () => {
-    const count = jobs.length
-    const confirmed = window.confirm(
-      count > 0
-        ? `Delete all ${count} job${count === 1 ? '' : 's'} saved for ${date}? This cannot be undone.`
-        : `There are no saved jobs for ${date} to delete.`
-    )
-    if (!confirmed || count === 0) return
-
-    setResetting(true)
-    setResetError(null)
-    try {
-      await deleteJobsForDate(date)
-      await loadJobs()
-    } catch (err) {
-      setResetError(err.message)
-    } finally {
-      setResetting(false)
-    }
-  }
-
-  const visibleJobs = jobs.filter(
-    (job) =>
-      matchesClientFilter(job, 'experience', filters.experience) &&
-      matchesClientFilter(job, 'employment_type', filters.employmentType)
-  )
+  const visibleJobs = viewCleared
+    ? []
+    : jobs.filter(
+        (job) =>
+          matchesClientFilter(job, 'experience', filters.experience) &&
+          matchesClientFilter(job, 'employment_type', filters.employmentType)
+      )
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -217,20 +200,26 @@ function Dashboard() {
         <JobFilters filters={filters} onChange={setFilters} />
         <button
           type="button"
-          onClick={handleResetJobs}
-          disabled={resetting || jobsLoading}
-          className="rounded-md border border-red-300 px-3 py-2 text-sm font-medium text-red-600 disabled:opacity-50"
+          onClick={() => setViewCleared((prev) => !prev)}
+          disabled={jobsLoading}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
         >
-          {resetting ? 'Resetting...' : `Reset jobs for ${date}`}
+          {viewCleared ? `Show jobs (${jobs.length})` : 'Clear view'}
         </button>
       </div>
 
       <div className="mt-6">
-        {resetError && <p className="text-sm text-red-600">{resetError}</p>}
         {jobsLoading && <p className="text-sm text-gray-500">Loading jobs...</p>}
         {jobsError && <p className="text-sm text-red-600">{jobsError}</p>}
 
-        {!jobsLoading && !jobsError && visibleJobs.length === 0 && (
+        {!jobsLoading && !jobsError && visibleJobs.length === 0 && viewCleared && (
+          <div className="rounded-md border border-dashed border-gray-300 p-8 text-center text-gray-500">
+            <p>View cleared.</p>
+            <p className="mt-1 text-sm">Click "Show jobs" above to bring them back.</p>
+          </div>
+        )}
+
+        {!jobsLoading && !jobsError && visibleJobs.length === 0 && !viewCleared && (
           <div className="rounded-md border border-dashed border-gray-300 p-8 text-center text-gray-500">
             <p>No jobs found for this date.</p>
             <p className="mt-1 text-sm">Try fetching Telegram messages.</p>

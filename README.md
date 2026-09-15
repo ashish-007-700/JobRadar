@@ -357,6 +357,20 @@ intentionally simple. It only catches the *same* Telegram message fetched twice;
 different wording (that kind of cross-channel/fuzzy dedup remains out of scope). The schema's
 `content_hash` column still exists but is unused.
 
+**Clearing the Dashboard's job list:** the **Clear view** button on the Dashboard is
+non-destructive — it just empties the list in that browser tab (`setJobs([])` client-side, no
+API call). Nothing is deleted from Supabase; changing the date, re-filtering, or clicking
+**Show jobs** brings the same data straight back. If you actually want to delete jobs for a
+date from Supabase (e.g. to purge test data), that's a separate, deliberately-not-wired-to-a-
+casual-button API call:
+
+```bash
+curl -X DELETE "http://localhost:8000/api/jobs?date=2026-09-15"
+```
+
+`date` is a required query param specifically so this can't be called without one and wipe
+every job in the table. This is a real, permanent delete — there's no undo.
+
 ## 13. Understanding the application URL resolver
 
 Given a job's initial "Apply Now" link, `backend/app/services/url_resolver.py` follows the
