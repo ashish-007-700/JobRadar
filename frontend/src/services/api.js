@@ -13,6 +13,10 @@ export async function checkHealth() {
   return request('/api/health')
 }
 
+export async function checkTelegramHealth() {
+  return request('/api/health/telegram')
+}
+
 export async function listChannels() {
   return request('/api/channels')
 }

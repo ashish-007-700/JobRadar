@@ -34,10 +34,16 @@ See [`docs/spec.md`](docs/spec.md) for the full project specification.
   `POST /api/telegram/fetch` via `resolve_urls: true`.
 - **Section 8 — Job storage:** Detected jobs can be persisted to the existing Supabase `jobs`
   table (opt-in via `save_jobs: true` on the fetch endpoint), with `GET /api/jobs`
-  (filterable by date/company/location) and `GET /api/jobs/{id}` to read them back, plus a
-  Jobs tab in the frontend.
+  (filterable by date/company/location) and `GET /api/jobs/{id}` to read them back.
+- **Section 9 — React dashboard:** The Dashboard tab is now the real day-to-day tool: a date
+  picker + "Fetch Messages" (runs fetch → detect → resolve → save in one call and refreshes
+  the list), a live Telegram status indicator, real summary counts, company/location
+  (server-side) and experience/employment-type (client-side) filters, and job cards with an
+  Apply button (`final_apply_url`, falling back to `original_apply_url`) plus an expandable
+  details view. The old standalone "Jobs" tab was folded into the Dashboard; a "Debug: Fetch
+  Test" tab remains for inspecting raw messages/per-channel results while tuning detection.
 
-Deduplication, scheduling, and the polished final dashboard are **not** implemented yet.
+Deduplication and scheduling are **not** implemented yet.
 
 ## Required software
 
@@ -352,9 +358,29 @@ Run it:
 npm run dev
 ```
 
-Opens on `http://localhost:5173`. The dashboard calls the backend's `/api/health` endpoint
-(via `frontend/src/services/api.js`, using the `VITE_API_BASE_URL` env variable) and shows
-whether the backend is connected.
+Opens on `http://localhost:5173`. All backend calls go through `frontend/src/services/api.js`
+(using the `VITE_API_BASE_URL` env variable) — no raw `fetch()` calls in components.
+
+### Dashboard tab
+
+The primary workflow: pick a date, click **Fetch Messages** (runs the full
+fetch → detect → resolve → save pipeline and reloads the jobs list), then browse job cards —
+click **View details** for the full extracted fields, Telegram source link, and both apply
+URLs, or **Apply Now** to open `final_apply_url` (falling back to `original_apply_url`) in a
+new tab. The header shows a live Telegram connection dot; when disconnected it tells you to
+run the login script rather than trying to authenticate from the browser. Company/location
+filters query the API directly; experience/employment-type filters narrow the already-loaded
+list client-side (the jobs API doesn't support server-side filtering on those fields).
+
+### Channels tab
+
+Unchanged from Section 4 — add/enable/disable/revalidate/delete Telegram channels.
+
+### Debug: Fetch Test tab
+
+Unchanged from Sections 5-7 — lets you inspect raw fetched messages, per-channel
+success/failure, and toggle URL resolution independently of saving. Useful while tuning the
+job-detection/resolver heuristics against real channel data.
 
 ## Environment variables
 

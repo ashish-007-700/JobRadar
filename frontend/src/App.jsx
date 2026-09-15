@@ -2,13 +2,11 @@ import { useState } from 'react'
 import Channels from './pages/Channels'
 import Dashboard from './pages/Dashboard'
 import FetchTest from './pages/FetchTest'
-import Jobs from './pages/Jobs'
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', Component: Dashboard },
   { id: 'channels', label: 'Channels', Component: Channels },
-  { id: 'fetch-test', label: 'Fetch Test', Component: FetchTest },
-  { id: 'jobs', label: 'Jobs', Component: Jobs },
+  { id: 'fetch-test', label: 'Debug: Fetch Test', Component: FetchTest },
 ]
 
 function App() {
@@ -18,7 +16,7 @@ function App() {
   return (
     <div>
       <nav className="border-b border-gray-200">
-        <div className="mx-auto flex max-w-3xl gap-4 px-4 py-3 text-sm font-medium">
+        <div className="mx-auto flex max-w-5xl gap-4 px-4 py-3 text-sm font-medium">
           {TABS.map(({ id, label }) => (
             <button
               key={id}
