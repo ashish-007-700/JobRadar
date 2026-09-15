@@ -1,8 +1,7 @@
 # Environment
 .env
-.env.local
-backend/.env
-frontend/.env
+.env.*
+!.env.example
 
 # Telegram session files
 *.session

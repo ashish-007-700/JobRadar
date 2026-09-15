@@ -1,58 +1,79 @@
 # JobRadar
 
-Personal job-post aggregator that reads job postings from configured Telegram channels,
-resolves each posting's final application URL, and displays them in a React dashboard.
+JobRadar is a personal job-post aggregation application. It will read job postings from
+configured Telegram channels, resolve each posting's final application URL, and display the
+results in a React dashboard.
 
 See [`docs/spec.md`](docs/spec.md) for the full project specification.
 
-## Project layout
+## Section 1 scope
 
-```text
-backend/    FastAPI application (Python)
-frontend/   React + Vite + Tailwind dashboard
-docs/       Project specification
-```
+This is the initial project setup only:
+
+- React + Vite + Tailwind frontend shell
+- FastAPI backend with a health-check endpoint
+- Frontend-to-backend communication over HTTP, with CORS restricted to the Vite dev origin
+- Environment variable structure for both apps
+
+Telegram, Supabase, web scraping, and job-fetching logic are **not** implemented yet — they
+belong to later sections.
+
+## Required software
+
+- Python 3.11+
+- Node.js 18+ and npm
 
 ## Backend setup
 
 ```bash
 cd backend
-python -m venv .venv
-.venv\Scripts\activate      # Windows
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # macOS/Linux
 pip install -r requirements.txt
-copy .env.example .env      # fill in Telegram/Supabase credentials later
-uvicorn app.main:app --reload --port 8000
+copy .env.example .env       # Windows; use `cp` on macOS/Linux
 ```
 
-Health check: `GET http://localhost:8000/api/health`
+Run it:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Health check: `GET http://localhost:8000/api/health` → `{"status": "ok"}`
 
 ## Frontend setup
 
 ```bash
 cd frontend
 npm install
+copy .env.example .env       # Windows; use `cp` on macOS/Linux
+```
+
+Run it:
+
+```bash
 npm run dev
 ```
 
-Opens on `http://localhost:5173`. API requests to `/api/*` are proxied to the backend at
-`http://localhost:8000` (see `vite.config.js`).
+Opens on `http://localhost:5173`. The dashboard calls the backend's `/api/health` endpoint
+(via `frontend/src/services/api.js`, using the `VITE_API_BASE_URL` env variable) and shows
+whether the backend is connected.
 
 ## Environment variables
 
-Copy `backend/.env.example` to `backend/.env` and fill in:
+`backend/.env.example`:
 
 ```text
-TELEGRAM_API_ID       # from https://my.telegram.org
-TELEGRAM_API_HASH
-SUPABASE_URL
-SUPABASE_KEY
+BACKEND_HOST=127.0.0.1
+BACKEND_PORT=8000
+FRONTEND_URL=http://localhost:5173
 ```
 
-Never commit `.env` files or Telegram `.session` files — both are already git-ignored.
+`frontend/.env.example`:
 
-## Status
+```text
+VITE_API_BASE_URL=http://localhost:8000
+```
 
-Section 1 (Project Setup) complete: backend and frontend skeletons run and the frontend
-can reach the backend through the dev proxy. Subsequent sections (Supabase setup, Telegram
-auth, channel management, fetching, job extraction, URL resolution, dashboard, etc.) follow
-the sequence in `docs/spec.md`.
+Never commit real `.env` files — only the `.env.example` templates are tracked.
