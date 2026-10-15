@@ -503,3 +503,5 @@ backend's own route-level tests (`test_jobs_api.py`, `test_fetch_controls.py`).
 - **No authentication layer** exists anywhere in this app (see §15) — this is a deliberate
   scope decision for a personal, localhost-only tool, not an oversight. Do not deploy this
   backend to a shared or public host as-is.
+#   J o b R a d a r  
+ 
